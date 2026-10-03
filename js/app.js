@@ -12,8 +12,8 @@
   var S = {
     user: null, membro: null, ready: false,
     cfg: null, plataformas: [], equipamentos: [], filamentos: [], insumos: [],
-    produtos: [], prodInsumos: [], anuncios: [], membros: [],
-    ui: { prodBusca: '', prodCat: '', prodStatus: '', verArquivados: false }
+    produtos: [], prodInsumos: [], anuncios: [], membros: [], carreteis: [],
+    ui: { prodBusca: '', prodCat: '', prodStatus: '', verArquivados: false, filOrd: 'restante', ord: {} }
   };
 
   // ------------------------------------------------------------------ utilidades
@@ -29,6 +29,7 @@
     if (typeof v === 'number') return isNaN(v) ? null : v;
     var s = String(v).trim().replace(/[R$\s%]/g, '');
     if (s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, ''); // "1.050" = mil e cinquenta
     var n = parseFloat(s);
     return isNaN(n) ? null : n;
   }
@@ -83,7 +84,7 @@
     if (/Email not confirmed/i.test(m)) return 'Este e-mail ainda não foi confirmado no Supabase.';
     if (/row-level security|permission denied/i.test(m)) return 'Sem permissão. Seu e-mail está liberado como membro?';
     if (/Failed to fetch|NetworkError/i.test(m)) return 'Sem conexão com o servidor. Verifique a internet.';
-    if (/column .* does not exist|Could not find the '.*' column/i.test(m)) return 'O banco precisa de atualização: rode o script 03 no SQL Editor do Supabase.';
+    if (/column .* does not exist|Could not find the '.*' column/i.test(m)) return 'O banco precisa de atualização: rode no SQL Editor do Supabase os scripts novos (03 e 04).';
     return m;
   }
   function q(res) { // checa resultado do supabase
@@ -174,6 +175,76 @@
     });
   }
 
+  // ------------------------------------------------------------------ foto em tela cheia
+  function thumbHtml(url, lista) {
+    if (!url) return '<div class="thumb"></div>';
+    return '<img class="thumb zoomable" loading="lazy" alt="Ver foto" src="' + esc(url) + '" data-zoom="' + esc(JSON.stringify(lista || [url])) + '">';
+  }
+  function abrirZoom(urls, i) {
+    fecharZoom();
+    var z = document.createElement('div');
+    z.className = 'zoom'; z.id = 'zoom'; z.setAttribute('role', 'dialog'); z.setAttribute('aria-modal', 'true');
+    function draw() {
+      z.innerHTML = '<img src="' + esc(urls[i]) + '" alt="Foto ' + (i + 1) + ' de ' + urls.length + '">' +
+        '<button type="button" class="zoom-x" data-z="x" aria-label="Fechar">✕</button>' +
+        (urls.length > 1 ? '<button type="button" class="zoom-nav prev" data-z="prev" aria-label="Foto anterior">‹</button><button type="button" class="zoom-nav next" data-z="next" aria-label="Próxima foto">›</button><div class="zoom-count">' + (i + 1) + ' / ' + urls.length + '</div>' : '');
+    }
+    z.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-z]');
+      if (b && b.dataset.z === 'prev') { i = (i - 1 + urls.length) % urls.length; draw(); return; }
+      if (b && b.dataset.z === 'next') { i = (i + 1) % urls.length; draw(); return; }
+      if (b || e.target === z) fecharZoom();
+    });
+    z.navegar = function (d) { if (urls.length > 1) { i = (i + d + urls.length) % urls.length; draw(); } };
+    draw();
+    document.body.appendChild(z);
+  }
+  function fecharZoom() { var z = $('#zoom'); if (z) z.remove(); }
+  document.addEventListener('click', function (e) {
+    var img = e.target.closest('img.zoomable, .photo img, .foto-uni img');
+    if (!img || e.target.closest('#zoom')) return;
+    var urls;
+    if (img.dataset.zoom) { try { urls = JSON.parse(img.dataset.zoom); } catch (x) { urls = [img.src]; } }
+    else if (img.closest('.photo')) urls = $$('#photos .photo img').map(function (x) { return x.getAttribute('src'); });
+    else urls = [img.getAttribute('src')];
+    var i = Math.max(0, urls.indexOf(img.getAttribute('src')));
+    e.preventDefault(); e.stopPropagation();
+    abrirZoom(urls, i);
+  }, true);
+  document.addEventListener('keydown', function (e) {
+    var z = $('#zoom'); if (!z) return;
+    if (e.key === 'Escape') { e.stopImmediatePropagation(); fecharZoom(); }
+    if (e.key === 'ArrowLeft') z.navegar(-1);
+    if (e.key === 'ArrowRight') z.navegar(1);
+  }, true);
+
+  // ------------------------------------------------------------------ ordenar tabelas pelo cabeçalho
+  function thOrd(tabela, k, t, cls) {
+    var o = S.ui.ord[tabela] || {};
+    var seta = o.k === k ? (o.dir > 0 ? ' ▲' : ' ▼') : '';
+    return '<th class="th-ord' + (cls ? ' ' + cls : '') + (o.k === k ? ' on' : '') + '" data-ord="' + tabela + ':' + k + '" tabindex="0" role="button" aria-sort="' + (o.k === k ? (o.dir > 0 ? 'ascending' : 'descending') : 'none') + '">' + esc(t) + seta + '</th>';
+  }
+  function clicarOrdem(th) {
+    var p = th.dataset.ord.split(':'), tabela = p[0], k = p[1];
+    var o = S.ui.ord[tabela] || {};
+    S.ui.ord[tabela] = o.k === k ? { k: k, dir: -o.dir } : { k: k, dir: 1 };
+    render();
+  }
+  document.addEventListener('keydown', function (e) {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('th[data-ord]')) { e.preventDefault(); clicarOrdem(e.target); }
+  });
+  function ordenarTabela(tabela, lista, getters) {
+    var o = S.ui.ord[tabela]; if (!o || !getters[o.k]) return lista;
+    var g = getters[o.k];
+    return lista.slice().sort(function (a, b) {
+      var x = g(a), y = g(b);
+      var vx = x === null || x === undefined || x === '', vy = y === null || y === undefined || y === '';
+      if (vx && vy) return 0; if (vx) return 1; if (vy) return -1; // vazios sempre no fim
+      var r = (typeof x === 'number' && typeof y === 'number') ? x - y : String(x).localeCompare(String(y), 'pt-BR', { sensitivity: 'base', numeric: true });
+      return r * o.dir;
+    });
+  }
+
   // ------------------------------------------------------------------ formulários genéricos
   // campo: {k, label, type:text|num|int|date|select|textarea|color|check|url|datalist, opts:[], ph, hint, span}
   function fieldHtml(f, val) {
@@ -235,6 +306,9 @@
     S.prodInsumos = q(r[6]) || [];
     S.anuncios = q(r[7]) || [];
     S.membros = q(r[8]) || [];
+    var rc = await sb.from('carreteis').select('*');
+    S.carreteis = rc.error ? [] : (rc.data || []);
+    S.faltaScript04 = !!rc.error;
     S.ready = true;
     corrigirInsumosAntigos();
   }
@@ -382,6 +456,7 @@
     renderNav(r.tela);
     var v = $('#view');
     v.onclick = null;
+    v.onkeydown = null;
     pasteAlvo.pagina = null;
     dirty = false;
     window.scrollTo(0, 0);
@@ -487,12 +562,18 @@
         return true;
       });
       if (!list.length) { $('#plist').innerHTML = '<div class="empty">' + (S.produtos.length ? 'Nenhum produto com esse filtro.' : 'Nenhum produto ainda. <a href="#/config">Importe o catálogo do site</a> ou <a href="#/produto/novo">cadastre o primeiro</a>.') + '</div>'; return; }
-      $('#plist').innerHTML = '<table class="tbl"><thead><tr><th></th><th>Produto</th><th class="hide-m">Categoria</th><th class="num hide-m">Custo</th><th class="num">Preço Pix</th><th class="num hide-m">Lucro</th><th class="num hide-m">Estoque</th><th class="hide-m">Site</th></tr></thead><tbody>' +
+      list = ordenarTabela('prod', list, {
+        nome: function (p) { return p.nome; }, cat: function (p) { return p.categoria; }, custo: function (p) { return custoProduto(p).total; },
+        preco: function (p) { return num(p.preco); }, lucro: function (p) { return num(p.preco) ? num(p.preco) - custoProduto(p).total : null; },
+        estoque: function (p) { return p.estoque || 0; }, site: function (p) { return !p.ativo ? 3 : !p.mostrar_no_site ? 2 : p.estoque > 0 ? 0 : 1; }
+      });
+      var th = function (k, t, cls) { return thOrd('prod', k, t, cls); };
+      $('#plist').innerHTML = '<table class="tbl"><thead><tr><th></th>' + th('nome', 'Produto') + th('cat', 'Categoria', 'hide-m') + th('custo', 'Custo', 'num hide-m') + th('preco', 'Preço Pix', 'num') + th('lucro', 'Lucro', 'num hide-m') + th('estoque', 'Estoque', 'num hide-m') + th('site', 'Site', 'hide-m') + '</tr></thead><tbody>' +
         list.map(function (p) {
           var c = custoProduto(p), preco = num(p.preco), l = preco ? preco - c.total : null;
           var site = !p.ativo ? '<span class="pill p-mut">Inativo</span>' : !p.mostrar_no_site ? '<span class="pill p-mut">Oculto</span>' : p.estoque > 0 ? '<span class="pill p-ok">Pronta entrega</span>' : '<span class="pill p-info">Sob encomenda</span>';
           return '<tr class="click" data-href="#/produto/' + p.id + '">' +
-            '<td style="width:58px">' + (p.fotos && p.fotos[0] ? '<img class="thumb" loading="lazy" alt="" src="' + esc(p.fotos[0]) + '">' : '<div class="thumb"></div>') + '</td>' +
+            '<td style="width:58px">' + thumbHtml(p.fotos && p.fotos[0], p.fotos) + '</td>' +
             '<td><div style="font-weight:700">' + esc(p.nome) + '</div><div class="small muted">' + (p.tipo_produto === 'revenda' ? 'Revenda' : (esc(p.material || '') + (p.tempo_min ? ' · ' + horas(p.tempo_min) : ''))) + '</div>' +
             '<div class="show-m small" style="margin-top:4px">' + site + ' <span class="muted">estoque ' + (p.estoque || 0) + '</span>' + (c.avisos.length ? ' <span class="pill p-warn">custo incompleto</span>' : ' <span class="muted">· lucro ' + brl(l) + '</span>') + '</div></td>' +
             '<td class="hide-m">' + esc(p.categoria || '—') + '</td>' +
@@ -506,6 +587,7 @@
     $('#pb').addEventListener('input', function (e) { S.ui.prodBusca = e.target.value; draw(); });
     $('#pc').addEventListener('change', function (e) { S.ui.prodCat = e.target.value; draw(); });
     $('#ps').addEventListener('change', function (e) { S.ui.prodStatus = e.target.value; draw(); });
+    $('#plist').addEventListener('click', function (e) { var t = e.target.closest('th[data-ord]'); if (t) { var p2 = t.dataset.ord.split(':'); var o = S.ui.ord.prod || {}; S.ui.ord.prod = o.k === p2[1] ? { k: p2[1], dir: -o.dir } : { k: p2[1], dir: 1 }; draw(); } });
     draw();
   }
 
@@ -828,50 +910,217 @@
     { k: 'cor_hex', label: 'Cor (amostra)', type: 'color' },
     { k: 'marca', label: 'Marca', ph: 'opcional' },
     { k: 'preco_pago', label: 'Preço pago (R$)', type: 'num' },
-    { k: 'peso_inicial_g', label: 'Peso do rolo (g)', type: 'num' },
-    { k: 'restante_g', label: 'Restante (g)', type: 'num', hint: 'Estimativa — o sistema desconta sozinho na etapa 2' },
     { k: 'data_compra', label: 'Data da compra', type: 'date' },
     { k: 'link_compra', label: 'Link de compra', span: 2, ph: 'cole o link aqui' },
     { k: 'observacoes', label: 'Observações', type: 'textarea', rows: 2, span: 2 }
   ];
+  var ORD_FIL = [
+    { v: 'restante', t: 'Restante (acabando primeiro)' },
+    { v: 'cor', t: 'Cor (A→Z)' },
+    { v: 'tipo', t: 'Tipo de filamento' },
+    { v: 'compra', t: 'Data de compra (mais recente)' },
+    { v: 'valor', t: 'Valor pago (maior)' },
+    { v: 'grama', t: 'Custo por grama (menor)' },
+    { v: 'marca', t: 'Marca (A→Z)' },
+    { v: 'recentes', t: 'Cadastrados por último' }
+  ];
+  function ordenarRolos(lista, modo) {
+    var txt = function (a, b) { return String(a || '').localeCompare(String(b || ''), 'pt-BR', { sensitivity: 'base' }); };
+    var cg = function (f) { var ini = num(f.peso_inicial_g); return num(f.preco_pago) && ini ? num(f.preco_pago) / ini : 9e9; };
+    var fn = {
+      restante: function (a, b) { return (num(a.restante_g) || 0) - (num(b.restante_g) || 0); },
+      cor: function (a, b) { return txt(a.cor, b.cor) || txt(a.tipo, b.tipo); },
+      tipo: function (a, b) { return txt(a.tipo, b.tipo) || txt(a.cor, b.cor); },
+      compra: function (a, b) { return txt(b.data_compra || '0', a.data_compra || '0'); },
+      valor: function (a, b) { return (num(b.preco_pago) || 0) - (num(a.preco_pago) || 0); },
+      grama: function (a, b) { return cg(a) - cg(b); },
+      marca: function (a, b) { return txt(a.marca, b.marca) || txt(a.tipo, b.tipo); },
+      recentes: function (a, b) { return txt(b.criado_em, a.criado_em); }
+    }[modo] || function () { return 0; };
+    return lista.slice().sort(fn);
+  }
+  function carretelDe(f) { return f && f.carretel_id ? byId(S.carreteis, f.carretel_id) : null; }
+
   function telaFilamentos(v) {
     setHeader('Filamentos', '<button class="btn btn-p" id="novo-rolo">+ <span class="long">Novo rolo</span></button>');
-    var lista = S.filamentos.filter(function (f) { return S.ui.verArquivados ? f.arquivado : !f.arquivado; });
+    var modo = S.ui.filOrd || 'restante';
+    var lista = ordenarRolos(S.filamentos.filter(function (f) { return S.ui.verArquivados ? f.arquivado : !f.arquivado; }), modo);
     var narq = S.filamentos.filter(function (f) { return f.arquivado; }).length;
-    v.innerHTML = '<div class="stack"><div class="row between wrap"><div class="small muted">Cada rolo com preço pago e restante estimado — o custo por grama dos produtos sai daqui.</div>' +
+    v.innerHTML = '<div class="stack">' +
+      '<div class="row between wrap">' +
+      '<div class="row wrap"><label class="lbl" for="fil-ord">Ordenar por</label><select class="inp" id="fil-ord" style="width:auto">' + ORD_FIL.map(function (o) { return '<option value="' + o.v + '"' + (o.v === modo ? ' selected' : '') + '>' + esc(o.t) + '</option>'; }).join('') + '</select></div>' +
       '<label class="check small"><input type="checkbox" id="ver-arq"' + (S.ui.verArquivados ? ' checked' : '') + '> Ver rolos que acabaram (' + narq + ')</label></div>' +
-      (lista.length ? '<div class="grid g3">' + lista.map(function (f) {
-        var ini = num(f.peso_inicial_g) || 1000, rest = num(f.restante_g) || 0, pct = Math.max(0, Math.min(100, Math.round(rest / ini * 100)));
-        var pg = num(f.preco_pago) && ini ? num(f.preco_pago) / ini : null;
-        return '<div class="card stack" style="gap:10px"><div class="row">' + (f.foto ? '<img class="swatch-foto" src="' + esc(f.foto) + '" alt="" loading="lazy" style="border-color:' + esc(f.cor_hex || '#ccc') + '">' : '<div class="swatch" style="background:' + esc(f.cor_hex || '#ccc') + '"></div>') +
-          '<div class="grow"><div style="font-weight:700">' + esc(f.tipo + ' ' + f.cor) + '</div><div class="lbl">' + esc(f.marca ? f.marca + ' · ' : '') + 'pago ' + brl(num(f.preco_pago)) + '</div></div>' +
-          '<button class="icon-btn" data-edit="' + f.id + '" aria-label="Editar rolo" title="Editar">' + ICON.edit + '</button></div>' +
-          '<div class="bar"><i style="width:' + pct + '%;background:' + (pct < 25 ? '#C2410C' : '#15803D') + '"></i></div>' +
-          '<div class="row between small"><span>Restante ~' + fmt(rest, 0) + ' g</span><span class="muted">' + (pg ? brl(pg).replace('R$ ', 'R$ ') + '/g' : '—') + '</span></div>' +
-          '<div style="border-top:1px solid #EFEDF4;padding-top:10px">' + (isUrl(f.link_compra) ? '<a href="' + esc(f.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none;font-size:13px">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + f.id + '">+ Colar link de compra</button>') + '</div></div>';
-      }).join('') + '</div>' : '<div class="card empty">' + (S.ui.verArquivados ? 'Nenhum rolo arquivado.' : 'Nenhum rolo cadastrado ainda. Clique em “Novo rolo”.') + '</div>') + '</div>';
+      (lista.length ? '<div class="grid g3">' + lista.map(cartaoRolo).join('') + '</div>' : '<div class="card empty">' + (S.ui.verArquivados ? 'Nenhum rolo arquivado.' : 'Nenhum rolo cadastrado ainda. Clique em “Novo rolo”.') + '</div>') +
+      secaoCarreteis() +
+      '</div>';
     $('#ver-arq').addEventListener('change', function (e) { S.ui.verArquivados = e.target.checked; render(); });
+    $('#fil-ord').addEventListener('change', function (e) { S.ui.filOrd = e.target.value; render(); });
     $('#novo-rolo').addEventListener('click', function () { editarFilamento(null); });
-    v.onclick = function (e) { var b = e.target.closest("[data-edit]"); if (b) editarFilamento(b.dataset.edit); };
+    v.onclick = function (e) {
+      var t;
+      if ((t = e.target.closest('[data-rest]'))) return editarRestanteNaHora(t.dataset.rest);
+      if ((t = e.target.closest('[data-pesar]'))) return pesarRolo(t.dataset.pesar);
+      if ((t = e.target.closest('[data-carr]'))) return editarCarretel(t.dataset.carr === 'novo' ? null : t.dataset.carr);
+      if ((t = e.target.closest('[data-edit]'))) return editarFilamento(t.dataset.edit);
+    };
+    v.onkeydown = function (e) {
+      var inp = e.target.closest('[data-rest-in]'); if (!inp) return;
+      if (e.key === 'Enter') { e.preventDefault(); salvarRestante(inp.dataset.restIn, inp.value); }
+      if (e.key === 'Escape') { e.stopPropagation(); render(); }
+    };
   }
-  function editarFilamento(id) {
-    var f = id ? byId(S.filamentos, id) : { tipo: 'PLA', cor: '', cor_hex: '#cccccc', peso_inicial_g: 1000, restante_g: 1000 };
+  function cartaoRolo(f) {
+    var ini = num(f.peso_inicial_g) || 1000, rest = num(f.restante_g) || 0, pct = Math.max(0, Math.min(100, Math.round(rest / ini * 100)));
+    var pg = num(f.preco_pago) && ini ? num(f.preco_pago) / ini : null;
+    var car = carretelDe(f);
+    return '<div class="card stack" style="gap:10px" data-rolo="' + f.id + '"><div class="row">' +
+      (f.foto ? '<img class="swatch-foto zoomable" data-zoom="' + esc(JSON.stringify([f.foto])) + '" src="' + esc(f.foto) + '" alt="Foto do rolo" loading="lazy" style="border-color:' + esc(f.cor_hex || '#ccc') + '">' : '<div class="swatch" style="background:' + esc(f.cor_hex || '#ccc') + '"></div>') +
+      '<div class="grow"><div style="font-weight:700">' + esc(f.tipo + ' ' + f.cor) + '</div><div class="lbl">' + esc(f.marca ? f.marca + ' · ' : '') + 'pago ' + brl(num(f.preco_pago)) + (f.data_compra ? ' · ' + dataBR(f.data_compra) : '') + '</div></div>' +
+      '<button class="icon-btn" data-edit="' + f.id + '" aria-label="Editar rolo" title="Editar">' + ICON.edit + '</button></div>' +
+      '<div class="bar"><i style="width:' + pct + '%;background:' + (pct < 25 ? '#C2410C' : '#15803D') + '"></i></div>' +
+      '<div class="row between small"><span class="rest-slot"><button type="button" class="rest-btn" data-rest="' + f.id + '" title="Clique para corrigir o restante">Restante ~' + fmt(rest, 0) + ' g ' + ICON.edit + '</button></span><span class="muted">' + (pg ? brl(pg) + '/g' : '—') + '</span></div>' +
+      '<div class="row between wrap" style="border-top:1px solid #EFEDF4;padding-top:10px;gap:8px">' +
+      (isUrl(f.link_compra) ? '<a href="' + esc(f.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none;font-size:13px">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + f.id + '">+ Colar link de compra</button>') +
+      '<button type="button" class="btn btn-g btn-s" data-pesar="' + f.id + '" title="Pesar na balança">⚖ Pesar' + (car ? '' : '') + '</button></div></div>';
+  }
+  function editarRestanteNaHora(id) {
+    var card = $('[data-rolo="' + id + '"]'); if (!card) return;
+    var f = byId(S.filamentos, id);
+    $('.rest-slot', card).innerHTML = '<span class="row" style="gap:6px"><input class="inp" data-rest-in="' + id + '" inputmode="decimal" value="' + esc(fmt(num(f.restante_g), 0).replace(/\./g, '')) + '" style="width:96px;min-height:36px;padding:6px 10px" aria-label="Restante em gramas"> g <button type="button" class="btn btn-p btn-s" data-rest-ok="' + id + '">OK</button></span>';
+    var inp = $('[data-rest-in]', card); inp.focus(); inp.select();
+    $('[data-rest-ok]', card).addEventListener('click', function (e) { e.stopPropagation(); salvarRestante(id, inp.value); });
+  }
+  async function salvarRestante(id, valor) {
+    var g = num(valor);
+    if (g === null || g < 0) return toast('Digite o restante em gramas', true);
+    try {
+      var r = q(await sb.from('filamentos').update({ restante_g: g }).eq('id', id).select().single());
+      S.filamentos = S.filamentos.map(function (x) { return x.id === id ? r : x; });
+      toast('Restante atualizado: ' + fmt(g, 0) + ' g ✓');
+      render();
+    } catch (err) { toast(erroMsg(err), true); }
+  }
+  function pesarRolo(id) {
+    var f = byId(S.filamentos, id);
+    if (!S.carreteis.length) {
+      return confirmar('Cadastre um carretel vazio primeiro', 'Para descontar o carretel, o sistema precisa saber quanto ele pesa vazio. Cadastre na seção “Carretéis vazios”, no fim desta página.', 'Cadastrar agora').then(function (ok) { if (ok) editarCarretel(null); });
+    }
+    var sel = f.carretel_id || (S.carreteis.filter(function (c) { return f.marca && c.marca && c.marca.toLowerCase() === f.marca.toLowerCase(); })[0] || {}).id || S.carreteis[0].id;
+    var m = modal('<div class="row between"><h2>Pesar rolo · ' + esc(f.tipo + ' ' + f.cor) + '</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
+      '<div class="grid g2">' +
+      '<div class="field"><label for="pz-peso">Peso na balança (g)</label><input class="inp" id="pz-peso" inputmode="decimal" placeholder="rolo + carretel"></div>' +
+      '<div class="field"><label for="pz-car">Carretel</label><select class="inp" id="pz-car">' + S.carreteis.map(function (c) { return '<option value="' + c.id + '"' + (c.id === sel ? ' selected' : '') + '>' + esc(c.nome) + ' (' + fmt(num(c.peso_g), 0) + ' g)</option>'; }).join('') + '</select></div>' +
+      '</div><div class="note" id="pz-res">Coloque o rolo na balança e digite o peso.</div>' +
+      '<div class="row" style="justify-content:flex-end"><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Salvar restante</button></div>', { size: 'sm' });
+    function calc() {
+      var p = num($('#pz-peso', m).value), c = byId(S.carreteis, $('#pz-car', m).value), tara = c ? num(c.peso_g) || 0 : 0;
+      if (p === null) { $('#pz-res', m).textContent = 'Coloque o rolo na balança e digite o peso.'; return null; }
+      var r = Math.max(0, p - tara);
+      $('#pz-res', m).innerHTML = fmt(p, 0) + ' g − carretel ' + fmt(tara, 0) + ' g = <b>' + fmt(r, 0) + ' g de filamento</b>';
+      return r;
+    }
+    $('#pz-peso', m).addEventListener('input', calc);
+    $('#pz-car', m).addEventListener('change', calc);
+    $('#pz-peso', m).addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); $('[data-x="save"]', m).click(); } });
+    m.addEventListener('click', async function (e) {
+      var b = e.target.closest('[data-x]'); if (!b) return;
+      if (b.dataset.x === 'close') return closeModal();
+      var r = calc(); if (r === null) return toast('Digite o peso da balança', true);
+      try {
+        var up = q(await sb.from('filamentos').update({ restante_g: r, carretel_id: $('#pz-car', m).value }).eq('id', id).select().single());
+        S.filamentos = S.filamentos.map(function (x) { return x.id === id ? up : x; });
+        closeModal(); toast('Restante: ' + fmt(r, 0) + ' g ✓'); render();
+      } catch (err) { toast(erroMsg(err), true); }
+    });
+  }
+  function secaoCarreteis() {
+    var usos = function (id) { return S.filamentos.filter(function (f) { return f.carretel_id === id; }).length; };
+    if (S.faltaScript04) return '<div class="card note">Para cadastrar carretéis vazios, rode o <b>script 04</b> no SQL Editor do Supabase e atualize a página.</div>';
+    return '<div class="card"><div class="row between wrap"><div><h2 style="margin:0">Carretéis vazios (tara)</h2><div class="small muted" style="margin-top:4px">O peso de cada carretel vazio, para o botão ⚖ Pesar descontar certinho.</div></div>' +
+      '<button class="btn btn-g" data-carr="novo">+ Novo carretel</button></div>' +
+      (S.carreteis.length ? '<div class="tbl-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th></th><th>Carretel</th><th class="hide-m">Marca</th><th class="num">Peso vazio</th><th class="num hide-m">Rolos usando</th><th></th></tr></thead><tbody>' +
+        S.carreteis.slice().sort(function (a, b) { return String(a.nome).localeCompare(String(b.nome), 'pt-BR'); }).map(function (c) {
+          return '<tr><td style="width:58px">' + thumbHtml(c.foto) + '</td><td style="font-weight:700">' + esc(c.nome) + '<div class="show-m small muted">' + esc(c.marca || '') + '</div></td><td class="hide-m">' + esc(c.marca || '—') + '</td>' +
+            '<td class="num">' + fmt(num(c.peso_g), 0) + ' g</td><td class="num hide-m">' + usos(c.id) + '</td>' +
+            '<td><button class="icon-btn" data-carr="' + c.id + '" aria-label="Editar carretel" title="Editar">' + ICON.edit + '</button></td></tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty" style="padding:18px">Nenhum carretel ainda. Pese um carretel vazio de cada marca e cadastre aqui.</div>') + '</div>';
+  }
+  var F_CAR = [
+    { k: 'nome', label: 'Nome', span: 2, ph: 'ex.: Carretel papelão Masterprint' },
+    { k: 'marca', label: 'Marca', list: ['Masterprint', 'Marba', 'Creality', 'Digital Qualy', 'Bambu Lab', 'Anycubic'] },
+    { k: 'peso_g', label: 'Peso vazio (g)', type: 'num' }
+  ];
+  function editarCarretel(id) {
+    var c = id ? byId(S.carreteis, id) : {};
     var novoId = id || uid();
-    var foto = { foto: f.foto || null };
-    var m = modal('<div class="row between"><h2>' + (id ? 'Editar rolo' : 'Novo rolo') + '</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
-      '<div class="grid g4">' + fotoUnicaHtml() + F_FIL.map(function (x) { return fieldHtml(x, f[x.k]); }).join('') + '</div>' +
-      '<div class="row wrap">' + (id ? '<button class="btn btn-g" data-x="arq">' + (f.arquivado ? 'Voltar para em uso' : 'Rolo acabou — arquivar') + '</button><button class="btn btn-d" data-x="del">Excluir</button>' : '') +
-      '<div class="grow"></div><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Salvar</button></div>');
-    ligarFotoUnica(m, foto, 'filamentos/' + novoId);
+    var foto = { foto: c.foto || null };
+    var m = modal('<div class="row between"><h2>' + (id ? 'Editar carretel' : 'Novo carretel vazio') + '</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
+      '<div class="grid g4">' + fotoUnicaHtml() + F_CAR.map(function (x) { return fieldHtml(x, c[x.k]); }).join('') + '</div>' +
+      '<div class="row">' + (id ? '<button class="btn btn-d" data-x="del">Excluir</button>' : '') + '<div class="grow"></div><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Salvar</button></div>');
+    ligarFotoUnica(m, foto, 'carreteis/' + novoId);
     m.addEventListener('click', async function (e) {
       var b = e.target.closest('[data-x]'); if (!b) return;
       var a = b.dataset.x;
       if (a === 'close') return closeModal();
       try {
         if (a === 'save') {
-          var o = readFields(F_FIL, m);
+          var o = readFields(F_CAR, m);
+          if (!o.nome) return toast('Dê um nome ao carretel', true);
+          if (!(o.peso_g > 0)) return toast('Informe o peso do carretel vazio', true);
+          o.id = novoId;
+          if (foto.mudou || foto.foto) o.foto = foto.foto;
+          var r = q(await sb.from('carreteis').upsert(o).select().single());
+          S.carreteis = S.carreteis.filter(function (x) { return x.id !== r.id; }).concat([r]);
+          toast('Carretel salvo ✓');
+        } else if (a === 'del') {
+          closeModal();
+          if (!(await confirmar('Excluir carretel?', 'Os rolos que usam este carretel continuam, só perdem a tara.', 'Excluir', true))) return;
+          q(await sb.from('carreteis').delete().eq('id', id));
+          S.carreteis = S.carreteis.filter(function (x) { return x.id !== id; });
+          S.filamentos.forEach(function (f) { if (f.carretel_id === id) f.carretel_id = null; });
+          toast('Carretel excluído');
+        }
+        closeModal(); render();
+      } catch (err) { toast(erroMsg(err), true); }
+    });
+  }
+  function editarFilamento(id) {
+    var f = id ? byId(S.filamentos, id) : { tipo: 'PLA', cor: '', cor_hex: '#cccccc', peso_inicial_g: 1000, restante_g: 1000 };
+    var novoId = id || uid();
+    var foto = { foto: f.foto || null };
+    var carOpts = [{ v: '', t: '— nenhum —' }].concat(S.carreteis.map(function (c) { return { v: c.id, t: c.nome + ' (' + fmt(num(c.peso_g), 0) + ' g)' }; }));
+    var fCar = { k: 'carretel_id', label: 'Carretel (para pesar)', type: 'select', opts: carOpts, span: 2 };
+    var kgAtual = (num(f.peso_inicial_g) || 1000) / 1000;
+    var pesoHtml = '<div class="field" style="grid-column:span 2"><label for="peso-kg">Peso do rolo (filamento)</label><div class="row wrap" style="gap:6px">' +
+      [1, 1.2, 2, 3].map(function (kg) { return '<button type="button" class="chip' + (Math.abs(kg - kgAtual) < 0.001 ? ' on' : '') + '" data-kg="' + kg + '">' + fmt(kg) + ' kg</button>'; }).join('') +
+      '<input class="inp" id="peso-kg" inputmode="decimal" value="' + esc(fmtIn(kgAtual)) + '" style="width:80px;min-height:40px" aria-label="Peso em kg"><span class="muted">kg</span></div></div>';
+    var fRest = { k: 'restante_g', label: 'Restante (g)', type: 'num', hint: 'Ou use o botão ⚖ Pesar no cartão' };
+    var m = modal('<div class="row between"><h2>' + (id ? 'Editar rolo' : 'Novo rolo') + '</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
+      '<div class="grid g4">' + fotoUnicaHtml() + F_FIL.slice(0, 4).map(function (x) { return fieldHtml(x, f[x.k]); }).join('') + pesoHtml +
+      (id ? fieldHtml(fRest, f.restante_g) : '') + F_FIL.slice(4).map(function (x) { return fieldHtml(x, f[x.k]); }).join('') + fieldHtml(fCar, f.carretel_id || '') + '</div>' +
+      (id ? '' : '<div class="hint">Rolo novo: o restante começa igual ao peso.</div>') +
+      '<div class="row wrap">' + (id ? '<button class="btn btn-g" data-x="arq">' + (f.arquivado ? 'Voltar para em uso' : 'Rolo acabou — arquivar') + '</button><button class="btn btn-d" data-x="del">Excluir</button>' : '') +
+      '<div class="grow"></div><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Salvar</button></div>');
+    ligarFotoUnica(m, foto, 'filamentos/' + novoId);
+    var pkg = $('#peso-kg', m);
+    function marcaChip() { var v = num(pkg.value); $$('.chip', m).forEach(function (c) { c.classList.toggle('on', v !== null && Math.abs(+c.dataset.kg - v) < 0.001); }); }
+    pkg.addEventListener('input', marcaChip);
+    m.addEventListener('click', async function (e) {
+      var chip = e.target.closest('[data-kg]');
+      if (chip) { pkg.value = fmtIn(chip.dataset.kg); marcaChip(); return; }
+      var b = e.target.closest('[data-x]'); if (!b) return;
+      var a = b.dataset.x;
+      if (a === 'close') return closeModal();
+      try {
+        if (a === 'save') {
+          var o = readFields(F_FIL.concat([fCar], id ? [fRest] : []), m);
           if (!o.tipo || !o.cor) return toast('Informe tipo e cor', true);
-          if (o.restante_g === null) o.restante_g = o.peso_inicial_g;
+          var kg = num(pkg.value);
+          if (kg > 50) kg = kg / 1000; // digitou em gramas (ex.: 1000)
+          if (!(kg > 0)) return toast('Informe o peso do rolo em kg', true);
+          o.peso_inicial_g = Math.round(kg * 1000);
+          if (!id || o.restante_g === null) o.restante_g = o.peso_inicial_g;
+          o.carretel_id = o.carretel_id || null;
           o.id = novoId;
           if (foto.mudou || foto.foto) o.foto = foto.foto;
           var r = q(await sb.from('filamentos').upsert(o).select().single());
@@ -915,13 +1164,18 @@
     var usoDe = function (id) {
       return S.prodInsumos.filter(function (x) { return x.insumo_id === id; }).map(function (x) { var p = byId(S.produtos, x.produto_id); return p ? p.nome : null; }).filter(Boolean);
     };
-    v.innerHTML = '<div class="card" style="padding:6px 8px">' + (S.insumos.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th></th><th>Item</th><th class="num hide-m">Custo unit.</th><th class="num hide-m">Em estoque</th><th class="hide-m">Usado em</th><th class="hide-m">Onde comprar</th><th></th></tr></thead><tbody>' +
-      S.insumos.map(function (i) {
+    var lista = ordenarTabela('ins', S.insumos, {
+      nome: function (i) { return i.nome; }, custo: function (i) { return num(i.custo_unitario); },
+      estoque: function (i) { return num(i.estoque); }, uso: function (i) { return usoDe(i.id).length; }
+    });
+    var th = function (k, t, cls) { return thOrd('ins', k, t, cls); };
+    v.innerHTML = '<div class="card" style="padding:6px 8px">' + (S.insumos.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th></th>' + th('nome', 'Item') + th('custo', 'Custo unit.', 'num hide-m') + th('estoque', 'Em estoque', 'num hide-m') + th('uso', 'Usado em', 'hide-m') + '<th class="hide-m">Onde comprar</th><th></th></tr></thead><tbody>' +
+      lista.map(function (i) {
         var uso = usoDe(i.id);
         var pac = num(i.qtd_pacote);
         var btnPac = pac ? '<button class="btn btn-g btn-s" data-pacote="' + i.id + '" title="Comprei mais um pacote">+1 pacote (+' + fmt(pac) + ')</button>' : '';
         var comprar = isUrl(i.link_compra) ? '<a href="' + esc(i.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + i.id + '">+ Colar link</button>';
-        return '<tr><td style="width:58px">' + (i.foto ? '<img class="thumb" loading="lazy" alt="" src="' + esc(i.foto) + '">' : '<div class="thumb"></div>') + '</td>' +
+        return '<tr><td style="width:58px">' + thumbHtml(i.foto) + '</td>' +
           '<td><div style="font-weight:700">' + esc(i.nome) + '</div>' + (pac && num(i.preco_pacote) ? '<div class="small muted">pacote de ' + fmt(pac) + ' por ' + brl(num(i.preco_pacote)) + '</div>' : '') +
           '<div class="show-m small" style="margin-top:6px">Custo: <b>' + brl(centavoAcima(num(i.custo_unitario))) + '</b> cada · Estoque: <b>' + fmt(num(i.estoque)) + ' ' + esc(un(i)) + '</b><div class="row wrap" style="gap:8px;margin-top:6px">' + btnPac + comprar + '</div></div></td>' +
           '<td class="num hide-m">' + brl(centavoAcima(num(i.custo_unitario))) + '</td>' +
@@ -932,6 +1186,7 @@
       }).join('') + '</tbody></table></div>' : '<div class="empty">Nenhum insumo ainda. Ex.: argola de chaveiro, embalagem, card “Obrigado”, manual.</div>') + '</div>';
     $('#novo-ins').addEventListener('click', function () { editarInsumo(null); });
     v.onclick = async function (e) {
+      var to = e.target.closest('th[data-ord]'); if (to) return clicarOrdem(to);
       var pb = e.target.closest('[data-pacote]');
       if (pb) { pb.disabled = true; try { await maisUmPacote(pb.dataset.pacote); render(); } catch (err) { toast(erroMsg(err), true); pb.disabled = false; } return; }
       var b = e.target.closest('[data-edit]'); if (b) editarInsumo(b.dataset.edit);
@@ -1002,16 +1257,33 @@
   }
 
   // ------------------------------------------------------------------ EQUIPAMENTOS
+  var TIPOS_EQ = [
+    { v: 'impressora', t: 'Impressora 3D' },
+    { v: 'impressora_papel', t: 'Impressora de papel' },
+    { v: 'acabamento', t: 'Acabamento' },
+    { v: 'medicao', t: 'Medição' },
+    { v: 'secagem', t: 'Secagem e armazenamento' },
+    { v: 'fotografia', t: 'Fotografia e exposição' },
+    { v: 'informatica', t: 'Informática' },
+    { v: 'ferramenta', t: 'Ferramenta (geral)' },
+    { v: 'outro', t: 'Outro (escrever qual)' }
+  ];
+  function tipoEqTxt(e) {
+    if (e.tipo === 'outro') return e.tipo_outro || 'Outro';
+    var t = TIPOS_EQ.filter(function (x) { return x.v === e.tipo; })[0];
+    return t ? t.t.replace(' (escrever qual)', '') : (e.tipo || '—');
+  }
+  function horasTotais(e) { return num(e.horas_iniciais) || 0; } // etapa 2: + horas das impressões registradas
   var F_EQ = [
     { k: 'nome', label: 'Nome', span: 2, ph: 'ex.: Kobra 4 · #1' },
-    { k: 'tipo', label: 'Tipo', type: 'select', opts: [{ v: 'impressora', t: 'Impressora' }, { v: 'ferramenta', t: 'Ferramenta' }, { v: 'outro', t: 'Outro' }] },
+    { k: 'tipo', label: 'Tipo', type: 'select', opts: TIPOS_EQ },
     { k: 'status', label: 'Status', type: 'select', opts: [{ v: 'ativo', t: 'Em uso' }, { v: 'chegando', t: 'Chegando' }, { v: 'manutencao', t: 'Em manutenção' }, { v: 'desativado', t: 'Desativado' }] },
-    { k: 'marca', label: 'Marca', list: ['Anycubic', 'Bambu Lab', 'Creality', 'Elegoo'] },
+    { k: 'marca', label: 'Marca', list: ['Anycubic', 'Bambu Lab', 'Creality', 'Elegoo', 'Epson'] },
     { k: 'modelo', label: 'Modelo' },
     { k: 'valor_pago', label: 'Valor pago (R$)', type: 'num' },
     { k: 'data_compra', label: 'Data da compra', type: 'date' },
-    { k: 'potencia_w', label: 'Consumo médio (W)', type: 'int', hint: 'Imprimindo PLA. Na dúvida: 120' },
-    { k: 'horas_iniciais', label: 'Horas já rodadas', type: 'num', hint: 'Antes de começar a usar o sistema' },
+    { k: 'potencia_w', label: 'Consumo médio (W)', type: 'int', hint: 'Impressora 3D imprimindo PLA. Na dúvida: 120' },
+    { k: 'horas_iniciais', label: 'Horas totais', type: 'num', hint: 'Horas que ela já rodou' },
     { k: 'link_compra', label: 'Link (peças / compra)', span: 2 },
     { k: 'observacoes', label: 'Observações', type: 'textarea', rows: 2, span: 4 }
   ];
@@ -1019,37 +1291,95 @@
     setHeader('Equipamentos', '<button class="btn btn-p" id="novo-eq">+ <span class="long">Novo equipamento</span></button>');
     var st = { ativo: ['p-ok', 'Em uso'], chegando: ['p-info', 'Chegando'], manutencao: ['p-warn', 'Manutenção'], desativado: ['p-mut', 'Desativado'] };
     var total = S.equipamentos.reduce(function (a, e) { return a + (num(e.valor_pago) || 0); }, 0);
-    v.innerHTML = '<div class="stack"><div class="grid g4">' + kpi('Equipamentos', S.equipamentos.length, impressoras().length + ' impressora(s)') + kpi('Investido', brl(total), 'soma dos valores pagos') + '</div>' +
-      '<div class="card" style="padding:6px 8px">' + (S.equipamentos.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Equipamento</th><th class="hide-m">Tipo</th><th class="num">Valor pago</th><th class="hide-m">Compra</th><th class="num">Consumo</th><th class="num">Horas totais</th><th>Status</th><th></th></tr></thead><tbody>' +
-        S.equipamentos.map(function (e) {
+    var lista = ordenarTabela('equip', S.equipamentos, {
+      nome: function (e) { return e.nome; }, tipo: tipoEqTxt, valor: function (e) { return num(e.valor_pago); },
+      compra: function (e) { return e.data_compra; }, consumo: function (e) { return num(e.potencia_w); },
+      horas: function (e) { return e.tipo === 'impressora' ? horasTotais(e) : null; }, status: function (e) { return (st[e.status] || st.ativo)[1]; }
+    });
+    var th = function (k, t, cls) { return thOrd('equip', k, t, cls); };
+    v.innerHTML = '<div class="stack"><div class="grid g4">' + kpi('Equipamentos', S.equipamentos.length, impressoras().length + ' impressora(s) 3D') + kpi('Investido', brl(total), 'soma dos valores pagos') + '</div>' +
+      '<div class="card" style="padding:6px 8px">' + (S.equipamentos.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th></th>' + th('nome', 'Equipamento') + th('tipo', 'Tipo', 'hide-m') + th('valor', 'Valor pago', 'num hide-m') + th('compra', 'Compra', 'hide-m') + th('consumo', 'Consumo', 'num hide-m') + th('horas', 'Horas totais', 'num hide-m') + th('status', 'Status', 'hide-m') + '<th></th></tr></thead><tbody>' +
+        lista.map(function (e) {
           var s = st[e.status] || st.ativo;
-          return '<tr><td><div style="font-weight:700">' + esc(e.nome) + '</div><div class="small muted">' + esc([e.marca, e.modelo].filter(Boolean).join(' ')) + '</div></td>' +
-            '<td class="hide-m">' + esc({ impressora: 'Impressora', ferramenta: 'Ferramenta', outro: 'Outro' }[e.tipo] || e.tipo) + '</td>' +
-            '<td class="num">' + brl(num(e.valor_pago)) + '</td><td class="hide-m">' + dataBR(e.data_compra) + '</td>' +
-            '<td class="num">' + (e.potencia_w ? e.potencia_w + ' W' : '—') + '</td>' +
-            '<td class="num">' + (e.tipo === 'impressora' ? fmt(num(e.horas_iniciais) || 0, 0) + ' h' : '—') + '</td>' +
-            '<td><span class="pill ' + s[0] + '">' + s[1] + '</span></td>' +
+          var horas = e.tipo === 'impressora'
+            ? '<span class="horas-slot"><button type="button" class="rest-btn" data-horas="' + e.id + '" title="Clique para corrigir as horas">' + fmt(horasTotais(e), 0) + ' h ' + ICON.edit + '</button></span>'
+            : '—';
+          return '<tr data-eq="' + e.id + '"><td style="width:58px">' + thumbHtml(e.foto) + '</td>' +
+            '<td><div style="font-weight:700">' + esc(e.nome) + '</div><div class="small muted">' + esc([e.marca, e.modelo].filter(Boolean).join(' ')) + '</div><div class="show-m small muted" style="margin-top:3px">' + esc(tipoEqTxt(e)) + ' · <span class="pill ' + s[0] + '">' + s[1] + '</span></div>' +
+            '<div class="show-m small" style="margin-top:4px">' + brl(num(e.valor_pago)) + (e.tipo === 'impressora' ? ' · ' + horas : '') + '</div></td>' +
+            '<td class="hide-m">' + esc(tipoEqTxt(e)) + '</td>' +
+            '<td class="num hide-m">' + brl(num(e.valor_pago)) + '</td><td class="hide-m">' + dataBR(e.data_compra) + '</td>' +
+            '<td class="num hide-m">' + (e.potencia_w ? e.potencia_w + ' W' : '—') + '</td>' +
+            '<td class="num hide-m">' + horas + '</td>' +
+            '<td class="hide-m"><span class="pill ' + s[0] + '">' + s[1] + '</span></td>' +
             '<td><button class="icon-btn" data-edit="' + e.id + '" aria-label="Editar equipamento" title="Editar">' + ICON.edit + '</button></td></tr>';
         }).join('') + '</tbody></table></div>' : '<div class="empty">Nenhum equipamento ainda. Comece pelas impressoras: Kobra X, Kobra 4 (×2) e A1 Mini.</div>') + '</div>' +
       '<div class="note">As horas por semana, quinzena e mês aparecem na <b>etapa 2</b>, quando as impressões começarem a ser registradas.</div></div>';
     $('#novo-eq').addEventListener('click', function () { editarEquip(null); });
-    v.onclick = function (e) { var b = e.target.closest("[data-edit]"); if (b) editarEquip(b.dataset.edit); };
+    v.onclick = function (e) {
+      var t;
+      if ((t = e.target.closest('th[data-ord]'))) return clicarOrdem(t);
+      if ((t = e.target.closest('[data-horas]'))) return editarHorasNaHora(t.dataset.horas);
+      if ((t = e.target.closest('[data-edit]'))) return editarEquip(t.dataset.edit);
+    };
+    v.onkeydown = function (e) {
+      var inp = e.target.closest('[data-horas-in]'); if (!inp) return;
+      if (e.key === 'Enter') { e.preventDefault(); salvarHoras(inp.dataset.horasIn, inp.value); }
+      if (e.key === 'Escape') { e.stopPropagation(); render(); }
+    };
+  }
+  function editarHorasNaHora(id) {
+    var tr = $('tr[data-eq="' + id + '"]'); if (!tr) return;
+    var eq = byId(S.equipamentos, id);
+    var slot = $$('.horas-slot', tr).filter(function (el) { return el.offsetParent !== null; })[0]; if (!slot) return;
+    slot.innerHTML = '<span class="row" style="gap:6px;justify-content:flex-end"><input class="inp" data-horas-in="' + id + '" inputmode="decimal" value="' + esc(String(horasTotais(eq))) + '" style="width:80px;min-height:36px;padding:6px 10px;text-align:right" aria-label="Horas totais"> h <button type="button" class="btn btn-p btn-s" data-horas-ok="' + id + '">OK</button></span>';
+    var inp = $('[data-horas-in]', slot); inp.focus(); inp.select();
+    $('[data-horas-ok]', slot).addEventListener('click', function (e) { e.stopPropagation(); salvarHoras(id, inp.value); });
+  }
+  async function salvarHoras(id, valor) {
+    var h = num(valor);
+    if (h === null || h < 0) return toast('Digite as horas', true);
+    try {
+      var r = q(await sb.from('equipamentos').update({ horas_iniciais: h }).eq('id', id).select().single());
+      S.equipamentos = S.equipamentos.map(function (x) { return x.id === id ? r : x; });
+      toast('Horas atualizadas: ' + fmt(h, 0) + ' h ✓');
+      render();
+    } catch (err) { toast(erroMsg(err), true); }
   }
   function editarEquip(id) {
     var it = id ? byId(S.equipamentos, id) : { tipo: 'impressora', status: 'ativo', horas_iniciais: 0 };
+    var novoId = id || uid();
+    var foto = { foto: it.foto || null };
+    var outros = [];
+    S.equipamentos.forEach(function (e) { if (e.tipo_outro && outros.indexOf(e.tipo_outro) < 0) outros.push(e.tipo_outro); });
+    var fOutro = { k: 'tipo_outro', label: 'Qual tipo?', ph: 'ex.: Mobiliário, Limpeza…', list: outros, span: 2 };
     var m = modal('<div class="row between"><h2>' + (id ? 'Editar equipamento' : 'Novo equipamento') + '</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
-      '<div class="grid g4">' + F_EQ.map(function (x) { return fieldHtml(x, it[x.k]); }).join('') + '</div>' +
+      '<div class="grid g4">' + fotoUnicaHtml() + F_EQ.slice(0, 3).map(function (x) { return fieldHtml(x, it[x.k]); }).join('') +
+      '<div id="box-outro" style="grid-column:1 / -1"><div class="grid g2">' + fieldHtml(fOutro, it.tipo_outro) + '</div><div class="hint" style="margin-top:4px">O que você escrever aqui vira opção nas próximas vezes.</div></div>' +
+      F_EQ.slice(3).map(function (x) { return fieldHtml(x, it[x.k]); }).join('') + '</div>' +
       '<div class="row">' + (id ? '<button class="btn btn-d" data-x="del">Excluir</button>' : '') + '<div class="grow"></div><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Salvar</button></div>');
+    ligarFotoUnica(m, foto, 'equipamentos/' + novoId);
+    var selTipo = $('[data-k="tipo"]', m);
+    function doTipo() {
+      var t = selTipo.value;
+      $('#box-outro', m).classList.toggle('hidden', t !== 'outro');
+      var imp = t === 'impressora';
+      ['potencia_w', 'horas_iniciais'].forEach(function (k) { var el = $('[data-k="' + k + '"]', m); if (el) el.closest('.field').classList.toggle('hidden', !imp); });
+    }
+    selTipo.addEventListener('change', doTipo); doTipo();
     m.addEventListener('click', async function (e) {
       var b = e.target.closest('[data-x]'); if (!b) return;
       var a = b.dataset.x;
       if (a === 'close') return closeModal();
       try {
         if (a === 'save') {
-          var o = readFields(F_EQ, m);
+          var o = readFields(F_EQ.concat([fOutro]), m);
           if (!o.nome) return toast('Informe o nome', true);
+          if (o.tipo === 'outro' && !o.tipo_outro) return toast('Escreva qual é o tipo', true);
+          if (o.tipo !== 'outro') o.tipo_outro = null;
           if (o.horas_iniciais === null) o.horas_iniciais = 0;
-          if (id) o.id = id;
+          o.id = novoId;
+          if (foto.mudou || foto.foto) o.foto = foto.foto;
           var r = q(await sb.from('equipamentos').upsert(o).select().single());
           S.equipamentos = S.equipamentos.filter(function (x) { return x.id !== r.id; }).concat([r]);
           toast('Equipamento salvo ✓');
