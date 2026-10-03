@@ -531,8 +531,8 @@
     var insBaixo = S.insumos.filter(function (i) { return (num(i.estoque) || 0) <= 5; });
 
     var alertas = [];
-    baixos.forEach(function (f) { alertas.push(['p-warn', 'Filamento', esc(f.tipo + ' ' + f.cor) + ' — restam ~' + fmt(num(f.restante_g), 0) + ' g' + (isUrl(f.link_compra) ? ' · <a href="' + esc(f.link_compra) + '" target="_blank" rel="noopener">Comprar de novo ↗</a>' : '')]); });
-    insBaixo.forEach(function (i) { alertas.push(['p-warn', 'Insumo', esc(i.nome) + ' — ' + fmt(num(i.estoque)) + ' ' + esc(un(i)) + ' em estoque']); });
+    baixos.forEach(function (f) { alertas.push(['p-warn', 'Filamento', esc(f.tipo + ' ' + f.cor) + ' — restam ~' + fmt(num(f.restante_g), 0) + ' g' + (isUrl(f.link_compra) ? ' · <a href="' + esc(f.link_compra) + '" target="_blank" rel="noopener">Comprar de novo ↗</a>' : '') + ' · <a href="#" data-preco-fil="' + f.id + '">Pesquisar preço</a>']); });
+    insBaixo.forEach(function (i) { alertas.push(['p-warn', 'Insumo', esc(i.nome) + ' — ' + fmt(num(i.estoque)) + ' ' + esc(un(i)) + ' em estoque' + (isUrl(i.link_compra) ? ' · <a href="' + esc(i.link_compra) + '" target="_blank" rel="noopener">Comprar de novo ↗</a>' : '') + ' · <a href="#" data-preco-ins="' + i.id + '">Pesquisar preço</a>']); });
     if (semDados.length) alertas.push(['p-info', 'Produtos', semDados.length + ' produto(s) impresso(s) sem gramas ou tempo — o custo fica incompleto. <a href="#/produtos?f=incompletos">Ver</a>']);
     if (semCustoRev.length) alertas.push(['p-info', 'Revenda', semCustoRev.length + ' produto(s) de revenda sem custo de compra.']);
     if (semFoto.length) alertas.push(['p-mut', 'Fotos', semFoto.length + ' produto(s) sem foto.']);
@@ -556,6 +556,12 @@
       '</div>' +
       '<div class="note">Vendas, produção, perdas e relatórios por período chegam na <b>etapa 2</b>. Por enquanto, ajuste o estoque direto na ficha de cada produto.</div>' +
       '</div>';
+    v.onclick = function (e) {
+      var t = e.target.closest('[data-preco-fil],[data-preco-ins]'); if (!t) return;
+      e.preventDefault();
+      if (t.dataset.precoFil) { var f = byId(S.filamentos, t.dataset.precoFil); pesquisarPreco(termoRolo(f), f.tipo + ' ' + f.cor); }
+      else { var it = byId(S.insumos, t.dataset.precoIns); pesquisarPreco(termoInsumo(it), it.nome); }
+    };
   }
   function kpi(l, v, s) { return '<div class="card kpi"><div class="lbl">' + esc(l) + '</div><div class="v">' + esc(v) + '</div>' + (s ? '<div class="small muted">' + esc(s) + '</div>' : '') + '</div>'; }
   function topLucro() {
@@ -943,6 +949,35 @@
     return sb.storage.from('fotos').getPublicUrl(path).data.publicUrl;
   }
 
+  // ------------------------------------------------------------------ pesquisar preço (abre as lojas já buscando, do mais barato)
+  function termoRolo(f) {
+    var kg = (num(f.peso_inicial_g) || 1000) / 1000;
+    return ['filamento', f.tipo, f.cor, f.marca, fmt(kg) + 'kg'].filter(Boolean).join(' ');
+  }
+  function termoInsumo(i) { return String(i.nome || '').split(/\s+/).slice(0, 8).join(' '); }
+  function lojasPara(t) {
+    var slug = norm(t).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    var qq = encodeURIComponent(t);
+    return [
+      { n: 'Mercado Livre', u: 'https://lista.mercadolivre.com.br/' + slug + '_OrderId_PRICE_NoIndex_True' },
+      { n: 'Shopee', u: 'https://shopee.com.br/search?keyword=' + qq + '&order=asc&sortBy=price' },
+      { n: 'Google Shopping', u: 'https://www.google.com/search?tbm=shop&tbs=p_ord:p&q=' + qq }
+    ];
+  }
+  function pesquisarPreco(termo, titulo) {
+    var m = modal('<div class="row between"><h2>Pesquisar preço</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
+      (titulo ? '<div class="muted small" style="margin-top:-8px">' + esc(titulo) + '</div>' : '') +
+      '<div class="field"><label for="pp-termo">O que procurar</label><input class="inp" id="pp-termo" value="' + esc(termo) + '"><div class="hint">Pode ajustar o texto antes de abrir. As lojas abrem já ordenadas do mais barato.</div></div>' +
+      '<div class="stack" style="gap:8px" id="pp-lojas"></div>', { size: 'sm', noFocus: true });
+    function draw() {
+      var t = $('#pp-termo', m).value.trim() || termo;
+      $('#pp-lojas', m).innerHTML = lojasPara(t).map(function (l) { return '<a class="btn btn-g" style="justify-content:space-between" href="' + esc(l.u) + '" target="_blank" rel="noopener">' + esc(l.n) + ' <span class="muted small">menor preço ' + ICON.ext + '</span></a>'; }).join('');
+    }
+    $('#pp-termo', m).addEventListener('input', draw);
+    m.addEventListener('click', function (e) { if (e.target.closest('[data-x="close"]')) closeModal(); });
+    draw();
+  }
+
   // ------------------------------------------------------------------ FILAMENTOS
   var F_FIL = [
     { k: 'tipo', label: 'Tipo', list: ['PLA', 'PETG', 'PLA Silk', 'PLA Matte', 'ABS', 'TPU'] },
@@ -1006,6 +1041,7 @@
       var t;
       if ((t = e.target.closest('[data-rest]'))) return editarRestanteNaHora(t.dataset.rest);
       if ((t = e.target.closest('[data-pesar]'))) return pesarRolo(t.dataset.pesar);
+      if ((t = e.target.closest('[data-preco-fil]'))) { var fr = byId(S.filamentos, t.dataset.precoFil); return pesquisarPreco(termoRolo(fr), fr.tipo + ' ' + fr.cor); }
       if ((t = e.target.closest('[data-carr]'))) return editarCarretel(t.dataset.carr === 'novo' ? null : t.dataset.carr);
       if ((t = e.target.closest('[data-edit]'))) return editarFilamento(t.dataset.edit);
     };
@@ -1027,7 +1063,8 @@
       '<div class="row between small"><span class="rest-slot"><button type="button" class="rest-btn" data-rest="' + f.id + '" title="Clique para corrigir o restante">Restante ~' + fmt(rest, 0) + ' g ' + ICON.edit + '</button></span><span class="muted">' + (pg ? brl(pg) + '/g' : '—') + '</span></div>' +
       '<div class="row between wrap" style="border-top:1px solid #EFEDF4;padding-top:10px;gap:8px">' +
       (isUrl(f.link_compra) ? '<a href="' + esc(f.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none;font-size:13px">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + f.id + '">+ Colar link de compra</button>') +
-      '<button type="button" class="btn btn-g btn-s" data-pesar="' + f.id + '" title="Pesar na balança">⚖ Pesar' + (car ? '' : '') + '</button></div></div>';
+      '<span class="row" style="gap:6px"><button type="button" class="btn btn-g btn-s" data-preco-fil="' + f.id + '" title="Pesquisar preço nas lojas">🔎 Preço</button>' +
+      '<button type="button" class="btn btn-g btn-s" data-pesar="' + f.id + '" title="Pesar na balança">⚖ Pesar</button></span></div></div>';
   }
   function editarRestanteNaHora(id) {
     var card = $('[data-rolo="' + id + '"]'); if (!card) return;
@@ -1216,7 +1253,8 @@
         var pac = num(i.qtd_pacote);
         var estoqueHtml = '<span class="est-slot"><button type="button" class="rest-btn" data-est="' + i.id + '" title="Clique para corrigir o estoque">' + fmt(num(i.estoque)) + ' ' + esc(un(i)) + ' ' + ICON.edit + '</button></span>' +
           '<div style="margin-top:4px"><button type="button" class="btn btn-g btn-s" data-sairam="' + i.id + '" title="Dar baixa: quantos saíram">− Saíram</button></div>';
-        var comprar = isUrl(i.link_compra) ? '<a href="' + esc(i.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + i.id + '">+ Colar link</button>';
+        var comprar = '<div class="row wrap" style="gap:6px">' + (isUrl(i.link_compra) ? '<a href="' + esc(i.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + i.id + '">+ Colar link</button>') +
+          '<button type="button" class="btn btn-g btn-s" data-preco-ins="' + i.id + '" title="Pesquisar preço nas lojas">🔎 Preço</button></div>';
         return '<tr><td style="width:58px">' + thumbHtml(i.foto) + '</td>' +
           '<td><div style="font-weight:700">' + esc(i.nome) + '</div>' + (pac && num(i.preco_pacote) ? '<div class="small muted">pacote de ' + fmt(pac) + ' por ' + brl(num(i.preco_pacote)) + '</div>' : '') +
           '<div class="show-m small" style="margin-top:6px">Custo: <b>' + brl(centavoAcima(num(i.custo_unitario))) + '</b> cada' + (pac ? ' · comprei ' + fmt(pac) : '') + '<div style="margin-top:6px">Estoque: ' + estoqueHtml + '</div><div style="margin-top:6px">' + comprar + '</div></div></td>' +
@@ -1233,6 +1271,7 @@
       var t;
       if ((t = e.target.closest('th[data-ord]'))) return clicarOrdem(t);
       if ((t = e.target.closest('[data-est-ok]'))) return;
+      if ((t = e.target.closest('[data-preco-ins]'))) { var ir = byId(S.insumos, t.dataset.precoIns); return pesquisarPreco(termoInsumo(ir), ir.nome); }
       if ((t = e.target.closest('[data-est]'))) return campoEstoque(t, 'est');
       if ((t = e.target.closest('[data-sairam]'))) return campoEstoque(t, 'sairam');
       if ((t = e.target.closest('[data-edit]'))) return editarInsumo(t.dataset.edit);
