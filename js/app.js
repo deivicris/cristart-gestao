@@ -36,6 +36,10 @@
     if (n === null || n === undefined || isNaN(n)) return '—';
     return 'R$ ' + Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
+  function brl4(n) { // até 4 casas, para custos unitários pequenos (ex.: R$ 0,4299)
+    if (n === null || n === undefined || isNaN(n)) return '—';
+    return 'R$ ' + Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  }
   function fmt(n, d) {
     if (n === null || n === undefined || isNaN(n)) return '';
     return Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: d == null ? 2 : d });
@@ -74,6 +78,7 @@
     if (/Email not confirmed/i.test(m)) return 'Este e-mail ainda não foi confirmado no Supabase.';
     if (/row-level security|permission denied/i.test(m)) return 'Sem permissão. Seu e-mail está liberado como membro?';
     if (/Failed to fetch|NetworkError/i.test(m)) return 'Sem conexão com o servidor. Verifique a internet.';
+    if (/column .* does not exist|Could not find the '.*' column/i.test(m)) return 'O banco precisa de atualização: rode o script 03 no SQL Editor do Supabase.';
     return m;
   }
   function q(res) { // checa resultado do supabase
@@ -92,7 +97,64 @@
     if (first && !opts.noFocus) setTimeout(function () { first.focus(); }, 30);
     return $('.modal', root);
   }
-  function closeModal() { $('#modal-root').innerHTML = ''; }
+  function closeModal() { $('#modal-root').innerHTML = ''; pasteAlvo.modal = null; }
+
+  // ------------------------------------------------------------------ imagens: colar (Ctrl+V), arrastar, escolher
+  var pasteAlvo = { pagina: null, modal: null };
+  function imagensDe(dt) {
+    var out = [];
+    if (!dt) return out;
+    if (dt.items) for (var i = 0; i < dt.items.length; i++) {
+      var it = dt.items[i];
+      if (it.kind === 'file' && /^image\//.test(it.type)) { var f = it.getAsFile(); if (f) out.push(f); }
+    }
+    if (!out.length && dt.files) for (var j = 0; j < dt.files.length; j++) if (/^image\//.test(dt.files[j].type)) out.push(dt.files[j]);
+    return out;
+  }
+  document.addEventListener('paste', function (e) {
+    var fn = $('#modal-root').innerHTML ? pasteAlvo.modal : pasteAlvo.pagina;
+    if (!fn) return;
+    var files = imagensDe(e.clipboardData);
+    if (!files.length) return; // texto colado segue normal
+    e.preventDefault(); fn(files);
+  });
+  function soltarImagens(el, fn) {
+    el.addEventListener('dragover', function (e) { e.preventDefault(); el.classList.add('drop-on'); });
+    el.addEventListener('dragleave', function (e) { if (!el.contains(e.relatedTarget)) el.classList.remove('drop-on'); });
+    el.addEventListener('drop', function (e) {
+      e.preventDefault(); el.classList.remove('drop-on');
+      var files = imagensDe(e.dataTransfer);
+      if (files.length) fn(files); else toast('Isso não parece uma imagem', true);
+    });
+  }
+  // campo de UMA foto dentro de um modal (insumo, rolo)
+  function fotoUnicaHtml() {
+    return '<div class="field" style="grid-column:1 / -1"><label>Foto</label><div class="foto-uni" id="foto-uni"></div><input type="file" id="foto-uni-in" accept="image/*" class="hidden"></div>';
+  }
+  function ligarFotoUnica(m, estado, pasta) {
+    var box = $('#foto-uni', m), inp = $('#foto-uni-in', m);
+    function draw(enviando) {
+      if (enviando) { box.innerHTML = '<div class="foto-uni-vazio"><span class="spinner" style="border-color:rgba(0,0,0,.15);border-top-color:var(--craft)"></span> Enviando…</div>'; return; }
+      box.innerHTML = estado.foto
+        ? '<img src="' + esc(estado.foto) + '" alt="Foto"><div class="stack" style="gap:8px"><button type="button" class="btn btn-g btn-s" data-fu="trocar">Trocar foto</button><button type="button" class="btn btn-d btn-s" data-fu="tirar">Remover</button><span class="hint">Ou cole outro print (Ctrl+V)</span></div>'
+        : '<button type="button" class="foto-uni-vazio" data-fu="trocar">' + ICON.plus + '<span><b>Escolher imagem</b>, arrastar para cá<br>ou <b>colar um print (Ctrl+V)</b></span></button>';
+    }
+    async function enviar(files) {
+      draw(true);
+      try { estado.foto = await enviarFoto(await comprimir(files[0], 1000), pasta); estado.mudou = true; }
+      catch (err) { toast('Erro ao enviar foto: ' + erroMsg(err), true); }
+      draw();
+    }
+    box.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-fu]'); if (!b) return;
+      if (b.dataset.fu === 'trocar') inp.click();
+      if (b.dataset.fu === 'tirar') { estado.foto = null; estado.mudou = true; draw(); }
+    });
+    inp.addEventListener('change', function () { var f = Array.prototype.slice.call(inp.files || []); inp.value = ''; if (f.length) enviar(f); });
+    soltarImagens(box, enviar);
+    pasteAlvo.modal = enviar;
+    draw();
+  }
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && $('#modal-root').innerHTML) closeModal(); });
 
   function confirmar(titulo, texto, okTxt, perigo) {
@@ -297,6 +359,7 @@
     renderNav(r.tela);
     var v = $('#view');
     v.onclick = null;
+    pasteAlvo.pagina = null;
     dirty = false;
     window.scrollTo(0, 0);
     try {
@@ -490,7 +553,7 @@
       '<div class="card"><h2>Básico</h2><div class="grid g4">' + fBasico.map(function (f) { return fieldHtml(f, p[f.k]); }).join('') + '</div>' +
       '<div class="row wrap" style="gap:22px;margin-top:8px">' + fFlags.map(function (f) { return fieldHtml(f, p[f.k]); }).join('') + '</div></div>' +
       // fotos
-      '<div class="card"><div class="row between"><h2 style="margin:0">Fotos</h2><span class="small muted">A primeira é a capa. Fotos são comprimidas antes de enviar.</span></div><div class="photos" id="photos" style="margin-top:12px"></div>' +
+      '<div class="card"><div class="row between"><h2 style="margin:0">Fotos</h2><span class="small muted">A primeira é a capa. Dá para escolher, arrastar ou colar um print (Ctrl+V).</span></div><div class="photos" id="photos" style="margin-top:12px"></div>' +
       '<input type="file" id="photo-in" accept="image/*" multiple class="hidden"></div>' +
       // textos
       '<div class="card"><h2>Textos e detalhes</h2><div class="grid g2">' + fTextos.map(function (f) { return fieldHtml(f, p[f.k]); }).join('') +
@@ -551,6 +614,21 @@
           '<button type="button" data-ph="del" data-i="' + i + '" aria-label="Remover foto" title="Remover">✕</button></div></div>';
       }).join('') + '<button type="button" class="photo-add" id="photo-add">' + ICON.plus + 'Adicionar</button>';
     }
+    async function adicionarFotos(files) {
+      if (!files.length) return;
+      var add = $('#photo-add'); add.disabled = true; add.innerHTML = '<span class="spinner" style="border-color:rgba(0,0,0,.15);border-top-color:var(--craft)"></span>Enviando…';
+      try {
+        for (var i = 0; i < files.length; i++) {
+          var blob = await comprimir(files[i]);
+          var url = await enviarFoto(blob, 'produtos/' + p.id);
+          p.fotos.push(url); dirty = true;
+        }
+        toast(files.length > 1 ? files.length + ' fotos enviadas' : 'Foto enviada');
+      } catch (err) { toast('Erro ao enviar foto: ' + erroMsg(err), true); }
+      drawPhotos();
+    }
+    pasteAlvo.pagina = adicionarFotos;
+    soltarImagens($('#photos'), adicionarFotos);
     drawPhotos();
     $('#photos').addEventListener('click', function (e) {
       var b = e.target.closest('button'); if (!b) return;
@@ -560,19 +638,9 @@
       if (b.dataset.ph === 'first') { var f = p.fotos.splice(i, 1)[0]; p.fotos.unshift(f); }
       dirty = true; drawPhotos();
     });
-    $('#photo-in').addEventListener('change', async function (e) {
+    $('#photo-in').addEventListener('change', function (e) {
       var files = Array.prototype.slice.call(e.target.files || []); e.target.value = '';
-      if (!files.length) return;
-      var add = $('#photo-add'); add.disabled = true; add.innerHTML = '<span class="spinner" style="border-color:rgba(0,0,0,.15);border-top-color:var(--craft)"></span>Enviando…';
-      try {
-        for (var i = 0; i < files.length; i++) {
-          var blob = await comprimir(files[i]);
-          var url = await enviarFoto(blob, p.id);
-          p.fotos.push(url); dirty = true;
-        }
-        toast(files.length > 1 ? files.length + ' fotos enviadas' : 'Foto enviada');
-      } catch (err) { toast('Erro ao enviar foto: ' + erroMsg(err), true); }
-      drawPhotos();
+      adicionarFotos(files);
     });
 
     // insumos
@@ -724,8 +792,8 @@
       img.src = url;
     });
   }
-  async function enviarFoto(blob, produtoId) {
-    var path = 'produtos/' + produtoId + '/' + Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '.jpg';
+  async function enviarFoto(blob, pasta) {
+    var path = pasta + '/' + Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '.jpg';
     q(await sb.storage.from('fotos').upload(path, blob, { contentType: 'image/jpeg', cacheControl: '31536000', upsert: false }));
     return sb.storage.from('fotos').getPublicUrl(path).data.publicUrl;
   }
@@ -752,7 +820,7 @@
       (lista.length ? '<div class="grid g3">' + lista.map(function (f) {
         var ini = num(f.peso_inicial_g) || 1000, rest = num(f.restante_g) || 0, pct = Math.max(0, Math.min(100, Math.round(rest / ini * 100)));
         var pg = num(f.preco_pago) && ini ? num(f.preco_pago) / ini : null;
-        return '<div class="card stack" style="gap:10px"><div class="row"><div class="swatch" style="background:' + esc(f.cor_hex || '#ccc') + '"></div>' +
+        return '<div class="card stack" style="gap:10px"><div class="row">' + (f.foto ? '<img class="swatch-foto" src="' + esc(f.foto) + '" alt="" loading="lazy" style="border-color:' + esc(f.cor_hex || '#ccc') + '">' : '<div class="swatch" style="background:' + esc(f.cor_hex || '#ccc') + '"></div>') +
           '<div class="grow"><div style="font-weight:700">' + esc(f.tipo + ' ' + f.cor) + '</div><div class="lbl">' + esc(f.marca ? f.marca + ' · ' : '') + 'pago ' + brl(num(f.preco_pago)) + '</div></div>' +
           '<button class="icon-btn" data-edit="' + f.id + '" aria-label="Editar rolo" title="Editar">' + ICON.edit + '</button></div>' +
           '<div class="bar"><i style="width:' + pct + '%;background:' + (pct < 25 ? '#C2410C' : '#15803D') + '"></i></div>' +
@@ -765,10 +833,13 @@
   }
   function editarFilamento(id) {
     var f = id ? byId(S.filamentos, id) : { tipo: 'PLA', cor: '', cor_hex: '#cccccc', peso_inicial_g: 1000, restante_g: 1000 };
+    var novoId = id || uid();
+    var foto = { foto: f.foto || null };
     var m = modal('<div class="row between"><h2>' + (id ? 'Editar rolo' : 'Novo rolo') + '</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
-      '<div class="grid g4">' + F_FIL.map(function (x) { return fieldHtml(x, f[x.k]); }).join('') + '</div>' +
+      '<div class="grid g4">' + fotoUnicaHtml() + F_FIL.map(function (x) { return fieldHtml(x, f[x.k]); }).join('') + '</div>' +
       '<div class="row wrap">' + (id ? '<button class="btn btn-g" data-x="arq">' + (f.arquivado ? 'Voltar para em uso' : 'Rolo acabou — arquivar') + '</button><button class="btn btn-d" data-x="del">Excluir</button>' : '') +
       '<div class="grow"></div><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Salvar</button></div>');
+    ligarFotoUnica(m, foto, 'filamentos/' + novoId);
     m.addEventListener('click', async function (e) {
       var b = e.target.closest('[data-x]'); if (!b) return;
       var a = b.dataset.x;
@@ -778,7 +849,8 @@
           var o = readFields(F_FIL, m);
           if (!o.tipo || !o.cor) return toast('Informe tipo e cor', true);
           if (o.restante_g === null) o.restante_g = o.peso_inicial_g;
-          if (id) o.id = id;
+          o.id = novoId;
+          if (foto.mudou || foto.foto) o.foto = foto.foto;
           var r = q(await sb.from('filamentos').upsert(o).select().single());
           S.filamentos = S.filamentos.filter(function (x) { return x.id !== r.id; }).concat([r]);
           toast('Rolo salvo ✓');
@@ -801,37 +873,87 @@
   // ------------------------------------------------------------------ INSUMOS
   var F_INS = [
     { k: 'nome', label: 'Nome', span: 2 },
-    { k: 'custo_unitario', label: 'Custo por unidade (R$)', type: 'num', hint: 'Ex.: pacote de 100 argolas por R$ 18 → 0,18' },
     { k: 'unidade', label: 'Unidade', ph: 'un, m, folha…' },
     { k: 'estoque', label: 'Em estoque', type: 'num' },
-    { k: 'link_compra', label: 'Link de compra', span: 3, ph: 'cole o link aqui' },
+    { k: 'preco_pacote', label: 'Preço do pacote (R$)', type: 'num', ph: 'ex.: 42,99' },
+    { k: 'qtd_pacote', label: 'Unidades no pacote', type: 'num', ph: 'ex.: 100' },
+    { k: 'custo_unitario', label: 'Custo por unidade (R$)', type: 'num' },
+    { k: 'link_compra', label: 'Link de compra', span: 4, ph: 'cole o link aqui' },
     { k: 'observacoes', label: 'Observações', type: 'textarea', rows: 2, span: 4 }
   ];
+  async function maisUmPacote(id) {
+    var it = byId(S.insumos, id); if (!it || !num(it.qtd_pacote)) return;
+    var novo = (num(it.estoque) || 0) + num(it.qtd_pacote);
+    var r = q(await sb.from('insumos').update({ estoque: novo }).eq('id', id).select().single());
+    S.insumos = S.insumos.map(function (x) { return x.id === id ? r : x; });
+    toast('+' + fmt(num(it.qtd_pacote)) + ' ' + (it.unidade || 'un') + ' no estoque de ' + it.nome + ' ✓');
+  }
   function telaInsumos(v) {
     setHeader('Insumos e extras', '<button class="btn btn-p" id="novo-ins">+ <span class="long">Novo insumo</span></button>');
     var usoDe = function (id) {
       return S.prodInsumos.filter(function (x) { return x.insumo_id === id; }).map(function (x) { var p = byId(S.produtos, x.produto_id); return p ? p.nome : null; }).filter(Boolean);
     };
-    v.innerHTML = '<div class="card" style="padding:6px 8px">' + (S.insumos.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Item</th><th class="num">Custo unit.</th><th class="num">Em estoque</th><th class="hide-m">Usado em</th><th>Onde comprar</th><th></th></tr></thead><tbody>' +
+    v.innerHTML = '<div class="card" style="padding:6px 8px">' + (S.insumos.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th></th><th>Item</th><th class="num hide-m">Custo unit.</th><th class="num hide-m">Em estoque</th><th class="hide-m">Usado em</th><th class="hide-m">Onde comprar</th><th></th></tr></thead><tbody>' +
       S.insumos.map(function (i) {
         var uso = usoDe(i.id);
-        return '<tr><td style="font-weight:700">' + esc(i.nome) + '</td><td class="num">' + brl(num(i.custo_unitario)) + '</td><td class="num">' + fmt(num(i.estoque)) + ' ' + esc(i.unidade || '') + '</td>' +
+        var pac = num(i.qtd_pacote);
+        var btnPac = pac ? '<button class="btn btn-g btn-s" data-pacote="' + i.id + '" title="Comprei mais um pacote">+1 pacote (+' + fmt(pac) + ')</button>' : '';
+        var comprar = isUrl(i.link_compra) ? '<a href="' + esc(i.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + i.id + '">+ Colar link</button>';
+        return '<tr><td style="width:58px">' + (i.foto ? '<img class="thumb" loading="lazy" alt="" src="' + esc(i.foto) + '">' : '<div class="thumb"></div>') + '</td>' +
+          '<td><div style="font-weight:700">' + esc(i.nome) + '</div>' + (pac && num(i.preco_pacote) ? '<div class="small muted">pacote de ' + fmt(pac) + ' por ' + brl(num(i.preco_pacote)) + '</div>' : '') +
+          '<div class="show-m small" style="margin-top:6px">Custo: <b>' + brl4(num(i.custo_unitario)) + '</b> por ' + esc(i.unidade || 'un') + ' · Estoque: <b>' + fmt(num(i.estoque)) + ' ' + esc(i.unidade || '') + '</b><div class="row wrap" style="gap:8px;margin-top:6px">' + btnPac + comprar + '</div></div></td>' +
+          '<td class="num hide-m">' + brl4(num(i.custo_unitario)) + '</td>' +
+          '<td class="num hide-m">' + fmt(num(i.estoque)) + ' ' + esc(i.unidade || '') + (btnPac ? '<div style="margin-top:4px">' + btnPac + '</div>' : '') + '</td>' +
           '<td class="hide-m small muted">' + (uso.length ? esc(uso.slice(0, 3).join(', ') + (uso.length > 3 ? ' +' + (uso.length - 3) : '')) : '—') + '</td>' +
-          '<td>' + (isUrl(i.link_compra) ? '<a href="' + esc(i.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + i.id + '">+ Colar link</button>') + '</td>' +
+          '<td class="hide-m">' + comprar + '</td>' +
           '<td><button class="icon-btn" data-edit="' + i.id + '" aria-label="Editar insumo" title="Editar">' + ICON.edit + '</button></td></tr>';
       }).join('') + '</tbody></table></div>' : '<div class="empty">Nenhum insumo ainda. Ex.: argola de chaveiro, embalagem, card “Obrigado”, manual.</div>') + '</div>';
     $('#novo-ins').addEventListener('click', function () { editarInsumo(null); });
-    v.onclick = function (e) { var b = e.target.closest("[data-edit]"); if (b) editarInsumo(b.dataset.edit); };
+    v.onclick = async function (e) {
+      var pb = e.target.closest('[data-pacote]');
+      if (pb) { pb.disabled = true; try { await maisUmPacote(pb.dataset.pacote); render(); } catch (err) { toast(erroMsg(err), true); pb.disabled = false; } return; }
+      var b = e.target.closest('[data-edit]'); if (b) editarInsumo(b.dataset.edit);
+    };
   }
   function editarInsumo(id) {
     var it = id ? byId(S.insumos, id) : { unidade: 'un', estoque: 0 };
+    var novoId = id || uid();
+    var foto = { foto: it.foto || null };
     var m = modal('<div class="row between"><h2>' + (id ? 'Editar insumo' : 'Novo insumo') + '</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
-      '<div class="grid g4">' + F_INS.map(function (x) { return fieldHtml(x, it[x.k]); }).join('') + '</div>' +
+      '<div class="grid g4">' + fotoUnicaHtml() + F_INS.map(function (x) { return fieldHtml(x, it[x.k]); }).join('') + '</div>' +
+      '<div class="row wrap between"><div class="hint" id="ins-calc"></div><button type="button" class="btn btn-g btn-s hidden" data-x="pacote" id="btn-pacote">Comprei mais um pacote</button></div>' +
       '<div class="row">' + (id ? '<button class="btn btn-d" data-x="del">Excluir</button>' : '') + '<div class="grow"></div><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Salvar</button></div>');
+    ligarFotoUnica(m, foto, 'insumos/' + novoId);
+    var elPac = $('[data-k="preco_pacote"]', m), elQtd = $('[data-k="qtd_pacote"]', m), elUni = $('[data-k="custo_unitario"]', m), elEst = $('[data-k="estoque"]', m);
+    var calc = $('#ins-calc', m), btnPac = $('#btn-pacote', m);
+    function doPacote() {
+      var pr = num(elPac.value), qt = num(elQtd.value);
+      btnPac.classList.toggle('hidden', !(qt > 0));
+      if (qt > 0) btnPac.textContent = 'Comprei mais um pacote (+' + fmt(qt) + ' no estoque)';
+      if (pr > 0 && qt > 0) {
+        var u = pr / qt;
+        elUni.value = fmtIn(String(Math.round(u * 10000) / 10000));
+        calc.textContent = 'Calculado pelo pacote: ' + brl(pr) + ' ÷ ' + fmt(qt) + ' = ' + brl4(u) + ' por unidade.';
+      } else calc.textContent = 'Preencha o preço do pacote e quantas unidades vêm nele — ou digite direto o custo por unidade.';
+    }
+    elPac.addEventListener('input', doPacote);
+    elQtd.addEventListener('input', doPacote);
+    elUni.addEventListener('input', function () {
+      if (elPac.value || elQtd.value) { elPac.value = ''; elQtd.value = ''; btnPac.classList.add('hidden'); }
+      calc.textContent = 'Usando o custo por unidade digitado.';
+    });
+    doPacote();
+    if (!elPac.value && elUni.value) calc.textContent = 'Usando o custo por unidade digitado.';
     m.addEventListener('click', async function (e) {
       var b = e.target.closest('[data-x]'); if (!b) return;
       var a = b.dataset.x;
       if (a === 'close') return closeModal();
+      if (a === 'pacote') {
+        var qt = num(elQtd.value) || 0;
+        elEst.value = fmtIn(String((num(elEst.value) || 0) + qt));
+        toast('+' + fmt(qt) + ' no estoque — clique em Salvar para gravar');
+        return;
+      }
       try {
         if (a === 'save') {
           var o = readFields(F_INS, m);
@@ -839,7 +961,8 @@
           if (o.custo_unitario === null) o.custo_unitario = 0;
           if (o.estoque === null) o.estoque = 0;
           o.unidade = o.unidade || 'un';
-          if (id) o.id = id;
+          o.id = novoId;
+          if (foto.mudou || foto.foto) o.foto = foto.foto;
           var r = q(await sb.from('insumos').upsert(o).select().single());
           S.insumos = S.insumos.filter(function (x) { return x.id !== r.id; }).concat([r]).sort(function (x, y) { return x.nome.localeCompare(y.nome); });
           toast('Insumo salvo ✓');
@@ -1031,7 +1154,7 @@
             else if (isUrl(imgs[j])) { fotos.push(imgs[j]); continue; }
             else continue;
             if (blob.size > 900 * 1024) blob = await comprimir(new File([blob], 'f.jpg', { type: blob.type }));
-            fotos.push(await enviarFoto(blob, id));
+            fotos.push(await enviarFoto(blob, 'produtos/' + id));
           } catch (err) { L('   foto ' + (j + 1) + ' falhou: ' + erroMsg(err)); }
         }
         var revenda = /^(fone|mouse|headphone|headset|teclado|caixa de som)\b/i.test(String(sp.name).trim());

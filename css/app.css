@@ -142,3 +142,11 @@ input[type=color].inp{padding:4px;height:44px}
   .modal-bg{padding:12px}
   .modal{padding:18px}
 }
+
+/* ---------- foto única (insumos, rolos) + arrastar/colar ---------- */
+.foto-uni{display:flex;gap:14px;align-items:center;border-radius:12px}
+.foto-uni img{width:120px;height:120px;object-fit:cover;border-radius:12px;border:1px solid var(--line);background:var(--surface-2)}
+.foto-uni-vazio{width:100%;min-height:96px;border:1.5px dashed var(--line-strong);border-radius:12px;background:var(--surface-2);display:flex;align-items:center;justify-content:center;gap:12px;color:var(--ink-soft);font-family:var(--body);font-size:13.5px;line-height:1.5;cursor:pointer;padding:12px;text-align:left}
+.foto-uni-vazio:hover{border-color:var(--craft);color:var(--craft-ink)}
+.drop-on{outline:2.5px dashed var(--craft);outline-offset:4px;background:var(--craft-soft)}
+.swatch-foto{width:44px;height:44px;border-radius:12px;object-fit:cover;border:3px solid #ccc;flex-shrink:0}
