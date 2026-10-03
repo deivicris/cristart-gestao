@@ -39,7 +39,8 @@
   }
   function centavoAcima(n) { // 0,4223 → 0,43
     if (n === null || n === undefined || isNaN(n)) return n;
-    return Math.ceil(Number(n) * 100 - 1e-9) / 100;
+    var r = Math.ceil(Number(n) * 100 - 1e-9) / 100;
+    return r === 0 ? 0 : r; // evita "-0,00"
   }
   function un(i) { var u = String((i && i.unidade) || '').trim(); return (!u || /^[0-9.,]+$/.test(u)) ? 'un' : u; }
   function brl4(n) { // até 4 casas, para custos unitários pequenos (ex.: R$ 0,4299)
@@ -1144,21 +1145,14 @@
 
   // ------------------------------------------------------------------ INSUMOS
   var F_INS = [
-    { k: 'nome', label: 'Nome', span: 3 },
-    { k: 'estoque', label: 'Em estoque', type: 'num' },
+    { k: 'nome', label: 'Nome', span: 4 },
     { k: 'preco_pacote', label: 'Preço do pacote (R$)', type: 'num', ph: 'ex.: 42,99' },
     { k: 'qtd_pacote', label: 'Unidades', type: 'num', ph: 'ex.: 100', hint: 'Quantas vêm no pacote' },
     { k: 'custo_unitario', label: 'Custo por unidade (R$)', type: 'num', hint: 'Calculado sozinho, arredondado para cima' },
+    { k: 'estoque', label: 'Em estoque', type: 'num', hint: 'Quantas você tem agora' },
     { k: 'link_compra', label: 'Link de compra', span: 4, ph: 'cole o link aqui' },
     { k: 'observacoes', label: 'Observações', type: 'textarea', rows: 2, span: 4 }
   ];
-  async function maisUmPacote(id) {
-    var it = byId(S.insumos, id); if (!it || !num(it.qtd_pacote)) return;
-    var novo = (num(it.estoque) || 0) + num(it.qtd_pacote);
-    var r = q(await sb.from('insumos').update({ estoque: novo }).eq('id', id).select().single());
-    S.insumos = S.insumos.map(function (x) { return x.id === id ? r : x; });
-    toast('+' + fmt(num(it.qtd_pacote)) + ' ' + un(it) + ' no estoque de ' + it.nome + ' ✓');
-  }
   function telaInsumos(v) {
     setHeader('Insumos e extras', '<button class="btn btn-p" id="novo-ins">+ <span class="long">Novo insumo</span></button>');
     var usoDe = function (id) {
@@ -1166,31 +1160,70 @@
     };
     var lista = ordenarTabela('ins', S.insumos, {
       nome: function (i) { return i.nome; }, custo: function (i) { return num(i.custo_unitario); },
+      pacote: function (i) { return num(i.qtd_pacote); },
       estoque: function (i) { return num(i.estoque); }, uso: function (i) { return usoDe(i.id).length; }
     });
     var th = function (k, t, cls) { return thOrd('ins', k, t, cls); };
-    v.innerHTML = '<div class="card" style="padding:6px 8px">' + (S.insumos.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th></th>' + th('nome', 'Item') + th('custo', 'Custo unit.', 'num hide-m') + th('estoque', 'Em estoque', 'num hide-m') + th('uso', 'Usado em', 'hide-m') + '<th class="hide-m">Onde comprar</th><th></th></tr></thead><tbody>' +
+    v.innerHTML = '<div class="card" style="padding:6px 8px">' + (S.insumos.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th></th>' + th('nome', 'Item') + th('custo', 'Custo unit.', 'num hide-m') + th('pacote', 'Comprei (un)', 'num hide-m') + th('uso', 'Usado em', 'hide-m') + '<th class="hide-m">Onde comprar</th>' + th('estoque', 'Em estoque', 'num hide-m') + '<th></th></tr></thead><tbody>' +
       lista.map(function (i) {
         var uso = usoDe(i.id);
         var pac = num(i.qtd_pacote);
-        var btnPac = pac ? '<button class="btn btn-g btn-s" data-pacote="' + i.id + '" title="Comprei mais um pacote">+1 pacote (+' + fmt(pac) + ')</button>' : '';
+        var estoqueHtml = '<span class="est-slot"><button type="button" class="rest-btn" data-est="' + i.id + '" title="Clique para corrigir o estoque">' + fmt(num(i.estoque)) + ' ' + esc(un(i)) + ' ' + ICON.edit + '</button></span>' +
+          '<div style="margin-top:4px"><button type="button" class="btn btn-g btn-s" data-sairam="' + i.id + '" title="Dar baixa: quantos saíram">− Saíram</button></div>';
         var comprar = isUrl(i.link_compra) ? '<a href="' + esc(i.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + i.id + '">+ Colar link</button>';
         return '<tr><td style="width:58px">' + thumbHtml(i.foto) + '</td>' +
           '<td><div style="font-weight:700">' + esc(i.nome) + '</div>' + (pac && num(i.preco_pacote) ? '<div class="small muted">pacote de ' + fmt(pac) + ' por ' + brl(num(i.preco_pacote)) + '</div>' : '') +
-          '<div class="show-m small" style="margin-top:6px">Custo: <b>' + brl(centavoAcima(num(i.custo_unitario))) + '</b> cada · Estoque: <b>' + fmt(num(i.estoque)) + ' ' + esc(un(i)) + '</b><div class="row wrap" style="gap:8px;margin-top:6px">' + btnPac + comprar + '</div></div></td>' +
+          '<div class="show-m small" style="margin-top:6px">Custo: <b>' + brl(centavoAcima(num(i.custo_unitario))) + '</b> cada' + (pac ? ' · comprei ' + fmt(pac) : '') + '<div style="margin-top:6px">Estoque: ' + estoqueHtml + '</div><div style="margin-top:6px">' + comprar + '</div></div></td>' +
           '<td class="num hide-m">' + brl(centavoAcima(num(i.custo_unitario))) + '</td>' +
-          '<td class="num hide-m">' + fmt(num(i.estoque)) + ' ' + esc(un(i)) + (btnPac ? '<div style="margin-top:4px">' + btnPac + '</div>' : '') + '</td>' +
+          '<td class="num hide-m">' + (pac ? fmt(pac) : '—') + '</td>' +
           '<td class="hide-m small muted">' + (uso.length ? esc(uso.slice(0, 3).join(', ') + (uso.length > 3 ? ' +' + (uso.length - 3) : '')) : '—') + '</td>' +
           '<td class="hide-m">' + comprar + '</td>' +
+          '<td class="num hide-m">' + estoqueHtml + '</td>' +
           '<td><button class="icon-btn" data-edit="' + i.id + '" aria-label="Editar insumo" title="Editar">' + ICON.edit + '</button></td></tr>';
       }).join('') + '</tbody></table></div>' : '<div class="empty">Nenhum insumo ainda. Ex.: argola de chaveiro, embalagem, card “Obrigado”, manual.</div>') + '</div>';
     $('#novo-ins').addEventListener('click', function () { editarInsumo(null); });
-    v.onclick = async function (e) {
-      var to = e.target.closest('th[data-ord]'); if (to) return clicarOrdem(to);
-      var pb = e.target.closest('[data-pacote]');
-      if (pb) { pb.disabled = true; try { await maisUmPacote(pb.dataset.pacote); render(); } catch (err) { toast(erroMsg(err), true); pb.disabled = false; } return; }
-      var b = e.target.closest('[data-edit]'); if (b) editarInsumo(b.dataset.edit);
+    v.onclick = function (e) {
+      var t;
+      if ((t = e.target.closest('th[data-ord]'))) return clicarOrdem(t);
+      if ((t = e.target.closest('[data-est-ok]'))) return;
+      if ((t = e.target.closest('[data-est]'))) return campoEstoque(t, 'est');
+      if ((t = e.target.closest('[data-sairam]'))) return campoEstoque(t, 'sairam');
+      if ((t = e.target.closest('[data-edit]'))) return editarInsumo(t.dataset.edit);
     };
+    v.onkeydown = function (e) {
+      var inp = e.target.closest('[data-est-in]'); if (!inp) return;
+      if (e.key === 'Enter') { e.preventDefault(); salvarEstoqueIns(inp.dataset.estIn, inp.dataset.modo, inp.value); }
+      if (e.key === 'Escape') { e.stopPropagation(); render(); }
+    };
+  }
+  // estoque do insumo direto na lista: corrigir o total ou dar baixa ("saíram")
+  function campoEstoque(btn, modo) {
+    var id = btn.dataset.est || btn.dataset.sairam;
+    var cel = btn.closest('td');
+    var it = byId(S.insumos, id);
+    var sairam = modo === 'sairam';
+    $$('.est-edit').forEach(function (x) { x.remove(); });
+    var box = document.createElement('div');
+    box.className = 'est-edit';
+    box.innerHTML = '<div class="small" style="font-weight:700;margin-bottom:4px">' + (sairam ? 'Quantos saíram?' : 'Estoque agora') + '</div>' +
+      '<div class="row" style="gap:6px"><input class="inp" data-est-in="' + id + '" data-modo="' + modo + '" inputmode="decimal" value="' + (sairam ? '' : esc(String(num(it.estoque) || 0))) + '" placeholder="' + (sairam ? 'ex.: 50' : '') + '" style="width:84px;min-height:36px;padding:6px 10px;text-align:right" aria-label="' + (sairam ? 'Quantos saíram' : 'Estoque') + '">' +
+      '<button type="button" class="btn btn-p btn-s" data-est-ok>OK</button></div>' +
+      (sairam ? '<div class="hint" style="margin-top:4px">Tem ' + fmt(num(it.estoque) || 0) + ' agora</div>' : '');
+    cel.appendChild(box);
+    var inp = $('input', box); inp.focus(); inp.select();
+    $('[data-est-ok]', box).addEventListener('click', function (e) { e.stopPropagation(); salvarEstoqueIns(id, modo, inp.value); });
+  }
+  async function salvarEstoqueIns(id, modo, valor) {
+    var n = num(valor);
+    if (n === null || n < 0) return toast(modo === 'sairam' ? 'Digite quantos saíram' : 'Digite o estoque', true);
+    var it = byId(S.insumos, id), atual = num(it.estoque) || 0;
+    var novo = modo === 'sairam' ? Math.max(0, atual - n) : n;
+    try {
+      var r = q(await sb.from('insumos').update({ estoque: novo }).eq('id', id).select().single());
+      S.insumos = S.insumos.map(function (x) { return x.id === id ? r : x; });
+      toast(modo === 'sairam' ? '−' + fmt(n) + ' · ' + it.nome + ': restam ' + fmt(novo) + ' ✓' : 'Estoque de ' + it.nome + ': ' + fmt(novo) + ' ✓');
+      render();
+    } catch (err) { toast(erroMsg(err), true); }
   }
   function editarInsumo(id) {
     var it = id ? byId(S.insumos, id) : { unidade: 'un', estoque: 0 };
@@ -1198,15 +1231,13 @@
     var foto = { foto: it.foto || null };
     var m = modal('<div class="row between"><h2>' + (id ? 'Editar insumo' : 'Novo insumo') + '</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
       '<div class="grid g4">' + fotoUnicaHtml() + F_INS.map(function (x) { return fieldHtml(x, it[x.k]); }).join('') + '</div>' +
-      '<div class="row wrap between"><div class="hint" id="ins-calc"></div><button type="button" class="btn btn-g btn-s hidden" data-x="pacote" id="btn-pacote">Comprei mais um pacote</button></div>' +
+      '<div class="hint" id="ins-calc"></div>' +
       '<div class="row">' + (id ? '<button class="btn btn-d" data-x="del">Excluir</button>' : '') + '<div class="grow"></div><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Salvar</button></div>');
     ligarFotoUnica(m, foto, 'insumos/' + novoId);
     var elPac = $('[data-k="preco_pacote"]', m), elQtd = $('[data-k="qtd_pacote"]', m), elUni = $('[data-k="custo_unitario"]', m), elEst = $('[data-k="estoque"]', m);
-    var calc = $('#ins-calc', m), btnPac = $('#btn-pacote', m);
+    var calc = $('#ins-calc', m);
     function doPacote() {
       var pr = num(elPac.value), qt = num(elQtd.value);
-      btnPac.classList.toggle('hidden', !(qt > 0));
-      if (qt > 0) btnPac.textContent = 'Comprei mais um pacote (+' + fmt(qt) + ' no estoque)';
       if (pr > 0 && qt > 0) {
         var u = centavoAcima(pr / qt);
         elUni.value = fmtIn(u.toFixed(2));
@@ -1216,7 +1247,7 @@
     elPac.addEventListener('input', doPacote);
     elQtd.addEventListener('input', doPacote);
     elUni.addEventListener('input', function () {
-      if (elPac.value || elQtd.value) { elPac.value = ''; elQtd.value = ''; btnPac.classList.add('hidden'); }
+      if (elPac.value || elQtd.value) { elPac.value = ''; elQtd.value = ''; }
       calc.textContent = 'Usando o custo por unidade digitado.';
     });
     doPacote();
@@ -1225,12 +1256,6 @@
       var b = e.target.closest('[data-x]'); if (!b) return;
       var a = b.dataset.x;
       if (a === 'close') return closeModal();
-      if (a === 'pacote') {
-        var qt = num(elQtd.value) || 0;
-        elEst.value = fmtIn(String((num(elEst.value) || 0) + qt));
-        toast('+' + fmt(qt) + ' no estoque — clique em Salvar para gravar');
-        return;
-      }
       try {
         if (a === 'save') {
           var o = readFields(F_INS, m);
