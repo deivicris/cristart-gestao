@@ -13,7 +13,7 @@
     user: null, membro: null, ready: false,
     cfg: null, plataformas: [], equipamentos: [], filamentos: [], insumos: [],
     produtos: [], prodInsumos: [], anuncios: [], membros: [], carreteis: [],
-    ui: { prodBusca: '', prodCat: '', prodStatus: '', verArquivados: false, filOrd: 'restante', ord: {} }
+    ui: { prodBusca: '', prodCat: '', prodStatus: '', verArquivados: false, filOrd: 'restante', ord: {}, busca: {} }
   };
 
   // ------------------------------------------------------------------ utilidades
@@ -218,6 +218,39 @@
     if (e.key === 'ArrowLeft') z.navegar(-1);
     if (e.key === 'ArrowRight') z.navegar(1);
   }, true);
+
+  // ------------------------------------------------------------------ busca (todas as abas)
+  function norm(t) { return String(t == null ? '' : t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+  function apelidosLink(u) { // "shopee", "mercado livre", "ml"… a partir do link
+    u = norm(u); var out = u;
+    if (/mercadoli[vb]re|mlstatic|meli/.test(u)) out += ' mercado livre ml';
+    if (/shopee/.test(u)) out += ' shopee';
+    if (/amazon/.test(u)) out += ' amazon';
+    if (/aliexpress/.test(u)) out += ' aliexpress ali';
+    if (/magazineluiza|magalu/.test(u)) out += ' magalu magazine luiza';
+    if (/tiktok/.test(u)) out += ' tiktok';
+    return out;
+  }
+  // todas as palavras digitadas precisam aparecer (ex.: "kobra x" acha "Kobra X")
+  function combina(textos, termo) {
+    var t = norm(termo).trim(); if (!t) return true;
+    var alvo = textos.map(function (x) { return /^https?:/i.test(String(x || '')) ? apelidosLink(x) : norm(x); }).join(' ');
+    return t.split(/\s+/).every(function (w) { return alvo.indexOf(w) >= 0; });
+  }
+  function buscaHtml(tela, ph) {
+    return '<div class="busca"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
+      '<input class="inp" type="search" id="busca-' + tela + '" placeholder="' + esc(ph) + '" value="' + esc(S.ui.busca[tela] || '') + '" aria-label="Pesquisar"></div>';
+  }
+  function ligarBusca(tela) {
+    var inp = $('#busca-' + tela); if (!inp) return;
+    inp.addEventListener('input', function () {
+      S.ui.busca[tela] = inp.value; S.ui.focoBusca = tela;
+      var pos = inp.selectionStart;
+      render();
+      var novo = $('#busca-' + tela); if (novo) { novo.focus(); try { novo.setSelectionRange(pos, pos); } catch (x) {} }
+    });
+  }
+  function nadaAchado(tela) { return '<div class="empty">Nada encontrado para “' + esc(S.ui.busca[tela]) + '”.</div>'; }
 
   // ------------------------------------------------------------------ ordenar tabelas pelo cabeçalho
   function thOrd(tabela, k, t, cls) {
@@ -460,7 +493,8 @@
     v.onkeydown = null;
     pasteAlvo.pagina = null;
     dirty = false;
-    window.scrollTo(0, 0);
+    if (!S.ui.focoBusca) window.scrollTo(0, 0);
+    S.ui.focoBusca = null;
     try {
       switch (r.tela) {
         case 'painel': return telaPainel(v);
@@ -542,7 +576,7 @@
     v.innerHTML =
       '<div class="stack">' +
       '<div class="row wrap">' +
-      '<input class="inp grow" id="pb" placeholder="Buscar produto…" value="' + esc(S.ui.prodBusca) + '" style="max-width:340px">' +
+      '<div class="busca grow" style="max-width:380px"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input class="inp" type="search" id="pb" placeholder="Pesquisar produto, categoria, material, Shopee…" value="' + esc(S.ui.prodBusca) + '" aria-label="Pesquisar produtos"></div>' +
       '<select class="inp" id="pc" style="width:auto"><option value="">Todas as categorias</option>' + categorias().map(function (c) { return '<option' + (S.ui.prodCat === c ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join('') + '</select>' +
       '<select class="inp" id="ps" style="width:auto">' + [['', 'Todos'], ['ativos', 'Só ativos'], ['estoque', 'Com estoque'], ['encomenda', 'Sob encomenda'], ['incompletos', 'Custo incompleto'], ['inativos', 'Inativos']].map(function (o) {
         return '<option value="' + o[0] + '"' + (S.ui.prodStatus === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
@@ -553,7 +587,12 @@
     function draw() {
       var b = S.ui.prodBusca.toLowerCase(), c = S.ui.prodCat, st = S.ui.prodStatus;
       var list = S.produtos.filter(function (p) {
-        if (b && String(p.nome).toLowerCase().indexOf(b) < 0) return false;
+        if (b) {
+          var ads = S.anuncios.filter(function (a) { return a.produto_id === p.id && (a.url || a.publicado); });
+          var txt = [p.nome, p.categoria, p.material, p.descricao_breve, p.medidas, p.tipo_produto === 'revenda' ? 'revenda' : 'impresso', p.codigo_site]
+            .concat(ads.map(function (a) { var pl = byId(S.plataformas, a.plataforma_id); return (pl ? pl.nome : a.plataforma_id); }), ads.map(function (a) { return a.url; }));
+          if (!combina(txt, b)) return false;
+        }
         if (c && p.categoria !== c) return false;
         if (st === 'ativos' && !p.ativo) return false;
         if (st === 'inativos' && p.ativo) return false;
@@ -945,17 +984,23 @@
   function telaFilamentos(v) {
     setHeader('Filamentos', '<button class="btn btn-p" id="novo-rolo">+ <span class="long">Novo rolo</span></button>');
     var modo = S.ui.filOrd || 'restante';
-    var lista = ordenarRolos(S.filamentos.filter(function (f) { return S.ui.verArquivados ? f.arquivado : !f.arquivado; }), modo);
+    var busca = S.ui.busca.fil || '';
+    var lista = ordenarRolos(S.filamentos.filter(function (f) {
+      if (busca) { var c = carretelDe(f); return combina([f.tipo, f.cor, f.marca, f.link_compra, f.observacoes, f.data_compra ? dataBR(f.data_compra) : '', c ? c.nome : '', f.arquivado ? 'acabou arquivado' : ''], busca); } // busca olha também os que acabaram
+      return S.ui.verArquivados ? f.arquivado : !f.arquivado;
+    }), modo);
     var narq = S.filamentos.filter(function (f) { return f.arquivado; }).length;
     v.innerHTML = '<div class="stack">' +
+      buscaHtml('fil', 'Pesquisar: PETG, preto, Masterprint, Shopee…') +
       '<div class="row between wrap">' +
       '<div class="row wrap"><label class="lbl" for="fil-ord">Ordenar por</label><select class="inp" id="fil-ord" style="width:auto">' + ORD_FIL.map(function (o) { return '<option value="' + o.v + '"' + (o.v === modo ? ' selected' : '') + '>' + esc(o.t) + '</option>'; }).join('') + '</select></div>' +
       '<label class="check small"><input type="checkbox" id="ver-arq"' + (S.ui.verArquivados ? ' checked' : '') + '> Ver rolos que acabaram (' + narq + ')</label></div>' +
-      (lista.length ? '<div class="grid g3">' + lista.map(cartaoRolo).join('') + '</div>' : '<div class="card empty">' + (S.ui.verArquivados ? 'Nenhum rolo arquivado.' : 'Nenhum rolo cadastrado ainda. Clique em “Novo rolo”.') + '</div>') +
+      (lista.length ? '<div class="grid g3">' + lista.map(cartaoRolo).join('') + '</div>' : busca ? '<div class="card">' + nadaAchado('fil') + '</div>' : '<div class="card empty">' + (S.ui.verArquivados ? 'Nenhum rolo arquivado.' : 'Nenhum rolo cadastrado ainda. Clique em “Novo rolo”.') + '</div>') +
       secaoCarreteis() +
       '</div>';
     $('#ver-arq').addEventListener('change', function (e) { S.ui.verArquivados = e.target.checked; render(); });
     $('#fil-ord').addEventListener('change', function (e) { S.ui.filOrd = e.target.value; render(); });
+    ligarBusca('fil');
     $('#novo-rolo').addEventListener('click', function () { editarFilamento(null); });
     v.onclick = function (e) {
       var t;
@@ -1158,13 +1203,14 @@
     var usoDe = function (id) {
       return S.prodInsumos.filter(function (x) { return x.insumo_id === id; }).map(function (x) { var p = byId(S.produtos, x.produto_id); return p ? p.nome : null; }).filter(Boolean);
     };
-    var lista = ordenarTabela('ins', S.insumos, {
+    var buscaI = S.ui.busca.ins || '';
+    var lista = ordenarTabela('ins', S.insumos.filter(function (i) { return combina([i.nome, i.link_compra, i.observacoes].concat(usoDe(i.id)), buscaI); }), {
       nome: function (i) { return i.nome; }, custo: function (i) { return num(i.custo_unitario); },
       pacote: function (i) { return num(i.qtd_pacote); },
       estoque: function (i) { return num(i.estoque); }, uso: function (i) { return usoDe(i.id).length; }
     });
     var th = function (k, t, cls) { return thOrd('ins', k, t, cls); };
-    v.innerHTML = '<div class="card" style="padding:6px 8px">' + (S.insumos.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th></th>' + th('nome', 'Item') + th('custo', 'Custo unit.', 'num hide-m') + th('pacote', 'Comprei (un)', 'num hide-m') + th('uso', 'Usado em', 'hide-m') + '<th class="hide-m">Onde comprar</th>' + th('estoque', 'Em estoque', 'num hide-m') + '<th></th></tr></thead><tbody>' +
+    v.innerHTML = '<div class="stack">' + buscaHtml('ins', 'Pesquisar: argola, embalagem, Mercado Livre…') + '<div class="card" style="padding:6px 8px">' + (lista.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th></th>' + th('nome', 'Item') + th('custo', 'Custo unit.', 'num hide-m') + th('pacote', 'Comprei (un)', 'num hide-m') + th('uso', 'Usado em', 'hide-m') + '<th class="hide-m">Onde comprar</th>' + th('estoque', 'Em estoque', 'num hide-m') + '<th></th></tr></thead><tbody>' +
       lista.map(function (i) {
         var uso = usoDe(i.id);
         var pac = num(i.qtd_pacote);
@@ -1180,8 +1226,9 @@
           '<td class="hide-m">' + comprar + '</td>' +
           '<td class="num hide-m">' + estoqueHtml + '</td>' +
           '<td><button class="icon-btn" data-edit="' + i.id + '" aria-label="Editar insumo" title="Editar">' + ICON.edit + '</button></td></tr>';
-      }).join('') + '</tbody></table></div>' : '<div class="empty">Nenhum insumo ainda. Ex.: argola de chaveiro, embalagem, card “Obrigado”, manual.</div>') + '</div>';
+      }).join('') + '</tbody></table></div>' : (buscaI ? nadaAchado('ins') : '<div class="empty">Nenhum insumo ainda. Ex.: argola de chaveiro, embalagem, card “Obrigado”, manual.</div>')) + '</div></div>';
     $('#novo-ins').addEventListener('click', function () { editarInsumo(null); });
+    ligarBusca('ins');
     v.onclick = function (e) {
       var t;
       if ((t = e.target.closest('th[data-ord]'))) return clicarOrdem(t);
@@ -1316,14 +1363,18 @@
     setHeader('Equipamentos', '<button class="btn btn-p" id="novo-eq">+ <span class="long">Novo equipamento</span></button>');
     var st = { ativo: ['p-ok', 'Em uso'], chegando: ['p-info', 'Chegando'], manutencao: ['p-warn', 'Manutenção'], desativado: ['p-mut', 'Desativado'] };
     var total = S.equipamentos.reduce(function (a, e) { return a + (num(e.valor_pago) || 0); }, 0);
-    var lista = ordenarTabela('equip', S.equipamentos, {
+    var buscaE = S.ui.busca.equip || '';
+    var lista = ordenarTabela('equip', S.equipamentos.filter(function (e) {
+      return combina([e.nome, e.marca, e.modelo, tipoEqTxt(e), e.link_compra, e.observacoes, (st[e.status] || st.ativo)[1]], buscaE);
+    }), {
       nome: function (e) { return e.nome; }, tipo: tipoEqTxt, valor: function (e) { return num(e.valor_pago); },
       compra: function (e) { return e.data_compra; }, consumo: function (e) { return num(e.potencia_w); },
       horas: function (e) { return e.tipo === 'impressora' ? horasTotais(e) : null; }, status: function (e) { return (st[e.status] || st.ativo)[1]; }
     });
     var th = function (k, t, cls) { return thOrd('equip', k, t, cls); };
     v.innerHTML = '<div class="stack"><div class="grid g4">' + kpi('Equipamentos', S.equipamentos.length, impressoras().length + ' impressora(s) 3D') + kpi('Investido', brl(total), 'soma dos valores pagos') + '</div>' +
-      '<div class="card" style="padding:6px 8px">' + (S.equipamentos.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th></th>' + th('nome', 'Equipamento') + th('tipo', 'Tipo', 'hide-m') + th('valor', 'Valor pago', 'num hide-m') + th('compra', 'Compra', 'hide-m') + th('consumo', 'Consumo', 'num hide-m') + th('horas', 'Horas totais', 'num hide-m') + th('status', 'Status', 'hide-m') + '<th></th></tr></thead><tbody>' +
+      buscaHtml('equip', 'Pesquisar: Kobra X, Anycubic, acabamento…') +
+      '<div class="card" style="padding:6px 8px">' + (lista.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th></th>' + th('nome', 'Equipamento') + th('tipo', 'Tipo', 'hide-m') + th('valor', 'Valor pago', 'num hide-m') + th('compra', 'Compra', 'hide-m') + th('consumo', 'Consumo', 'num hide-m') + th('horas', 'Horas totais', 'num hide-m') + th('status', 'Status', 'hide-m') + '<th></th></tr></thead><tbody>' +
         lista.map(function (e) {
           var s = st[e.status] || st.ativo;
           var horas = e.tipo === 'impressora'
@@ -1338,9 +1389,10 @@
             '<td class="num hide-m">' + horas + '</td>' +
             '<td class="hide-m"><span class="pill ' + s[0] + '">' + s[1] + '</span></td>' +
             '<td><button class="icon-btn" data-edit="' + e.id + '" aria-label="Editar equipamento" title="Editar">' + ICON.edit + '</button></td></tr>';
-        }).join('') + '</tbody></table></div>' : '<div class="empty">Nenhum equipamento ainda. Comece pelas impressoras: Kobra X, Kobra 4 (×2) e A1 Mini.</div>') + '</div>' +
+        }).join('') + '</tbody></table></div>' : (buscaE ? nadaAchado('equip') : '<div class="empty">Nenhum equipamento ainda. Comece pelas impressoras: Kobra X, Kobra 4 (×2) e A1 Mini.</div>')) + '</div>' +
       '<div class="note">As horas por semana, quinzena e mês aparecem na <b>etapa 2</b>, quando as impressões começarem a ser registradas.</div></div>';
     $('#novo-eq').addEventListener('click', function () { editarEquip(null); });
+    ligarBusca('equip');
     v.onclick = function (e) {
       var t;
       if ((t = e.target.closest('th[data-ord]'))) return clicarOrdem(t);

@@ -178,3 +178,8 @@ img.zoomable,.photo img,.foto-uni img{cursor:zoom-in}
 .zoom-count{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);color:#fff;font-family:var(--mono);font-size:12px;background:rgba(0,0,0,.4);padding:4px 10px;border-radius:99px}
 @media (max-width:760px){.zoom{padding:56px 10px}.zoom-nav{top:auto;bottom:14px;transform:none}}
 .est-edit{margin-top:8px;padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);display:inline-block;text-align:left}
+
+/* ---------- busca ---------- */
+.busca{position:relative;display:flex;align-items:center;max-width:460px;width:100%}
+.busca svg{position:absolute;left:13px;color:var(--ink-faint);pointer-events:none}
+.busca .inp{padding-left:40px}
