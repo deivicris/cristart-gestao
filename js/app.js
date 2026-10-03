@@ -36,6 +36,11 @@
     if (n === null || n === undefined || isNaN(n)) return '—';
     return 'R$ ' + Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
+  function centavoAcima(n) { // 0,4223 → 0,43
+    if (n === null || n === undefined || isNaN(n)) return n;
+    return Math.ceil(Number(n) * 100 - 1e-9) / 100;
+  }
+  function un(i) { var u = String((i && i.unidade) || '').trim(); return (!u || /^[0-9.,]+$/.test(u)) ? 'un' : u; }
   function brl4(n) { // até 4 casas, para custos unitários pequenos (ex.: R$ 0,4299)
     if (n === null || n === undefined || isNaN(n)) return '—';
     return 'R$ ' + Number(n).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
@@ -231,6 +236,24 @@
     S.anuncios = q(r[7]) || [];
     S.membros = q(r[8]) || [];
     S.ready = true;
+    corrigirInsumosAntigos();
+  }
+  // Ajuste único: quem digitou a quantidade do pacote no antigo campo "Unidade" (ex.: "100")
+  // passa a ter isso em "Unidades"; custos com mais de 2 casas são arredondados para cima.
+  function corrigirInsumosAntigos() {
+    S.insumos.forEach(function (i) {
+      var patch = {};
+      var u = String(i.unidade || '').trim();
+      if (/^[0-9]+([.,][0-9]+)?$/.test(u)) {
+        patch.unidade = 'un';
+        if (!num(i.qtd_pacote) && num(u) > 1) patch.qtd_pacote = num(u);
+      }
+      var c = num(i.custo_unitario);
+      if (c !== null && centavoAcima(c) !== c) patch.custo_unitario = centavoAcima(c);
+      if (!Object.keys(patch).length) return;
+      Object.assign(i, patch);
+      sb.from('insumos').update(patch).eq('id', i.id).then(function () {}, function () {});
+    });
   }
   function byId(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
   function impressoras() { return S.equipamentos.filter(function (e) { return e.tipo === 'impressora' && e.status !== 'desativado'; }); }
@@ -399,7 +422,7 @@
 
     var alertas = [];
     baixos.forEach(function (f) { alertas.push(['p-warn', 'Filamento', esc(f.tipo + ' ' + f.cor) + ' — restam ~' + fmt(num(f.restante_g), 0) + ' g' + (isUrl(f.link_compra) ? ' · <a href="' + esc(f.link_compra) + '" target="_blank" rel="noopener">Comprar de novo ↗</a>' : '')]); });
-    insBaixo.forEach(function (i) { alertas.push(['p-warn', 'Insumo', esc(i.nome) + ' — ' + fmt(num(i.estoque)) + ' ' + esc(i.unidade || 'un') + ' em estoque']); });
+    insBaixo.forEach(function (i) { alertas.push(['p-warn', 'Insumo', esc(i.nome) + ' — ' + fmt(num(i.estoque)) + ' ' + esc(un(i)) + ' em estoque']); });
     if (semDados.length) alertas.push(['p-info', 'Produtos', semDados.length + ' produto(s) impresso(s) sem gramas ou tempo — o custo fica incompleto. <a href="#/produtos?f=incompletos">Ver</a>']);
     if (semCustoRev.length) alertas.push(['p-info', 'Revenda', semCustoRev.length + ' produto(s) de revenda sem custo de compra.']);
     if (semFoto.length) alertas.push(['p-mut', 'Fotos', semFoto.length + ' produto(s) sem foto.']);
@@ -872,12 +895,11 @@
 
   // ------------------------------------------------------------------ INSUMOS
   var F_INS = [
-    { k: 'nome', label: 'Nome', span: 2 },
-    { k: 'unidade', label: 'Unidade', ph: 'un, m, folha…' },
+    { k: 'nome', label: 'Nome', span: 3 },
     { k: 'estoque', label: 'Em estoque', type: 'num' },
     { k: 'preco_pacote', label: 'Preço do pacote (R$)', type: 'num', ph: 'ex.: 42,99' },
-    { k: 'qtd_pacote', label: 'Unidades no pacote', type: 'num', ph: 'ex.: 100' },
-    { k: 'custo_unitario', label: 'Custo por unidade (R$)', type: 'num' },
+    { k: 'qtd_pacote', label: 'Unidades', type: 'num', ph: 'ex.: 100', hint: 'Quantas vêm no pacote' },
+    { k: 'custo_unitario', label: 'Custo por unidade (R$)', type: 'num', hint: 'Calculado sozinho, arredondado para cima' },
     { k: 'link_compra', label: 'Link de compra', span: 4, ph: 'cole o link aqui' },
     { k: 'observacoes', label: 'Observações', type: 'textarea', rows: 2, span: 4 }
   ];
@@ -886,7 +908,7 @@
     var novo = (num(it.estoque) || 0) + num(it.qtd_pacote);
     var r = q(await sb.from('insumos').update({ estoque: novo }).eq('id', id).select().single());
     S.insumos = S.insumos.map(function (x) { return x.id === id ? r : x; });
-    toast('+' + fmt(num(it.qtd_pacote)) + ' ' + (it.unidade || 'un') + ' no estoque de ' + it.nome + ' ✓');
+    toast('+' + fmt(num(it.qtd_pacote)) + ' ' + un(it) + ' no estoque de ' + it.nome + ' ✓');
   }
   function telaInsumos(v) {
     setHeader('Insumos e extras', '<button class="btn btn-p" id="novo-ins">+ <span class="long">Novo insumo</span></button>');
@@ -901,9 +923,9 @@
         var comprar = isUrl(i.link_compra) ? '<a href="' + esc(i.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + i.id + '">+ Colar link</button>';
         return '<tr><td style="width:58px">' + (i.foto ? '<img class="thumb" loading="lazy" alt="" src="' + esc(i.foto) + '">' : '<div class="thumb"></div>') + '</td>' +
           '<td><div style="font-weight:700">' + esc(i.nome) + '</div>' + (pac && num(i.preco_pacote) ? '<div class="small muted">pacote de ' + fmt(pac) + ' por ' + brl(num(i.preco_pacote)) + '</div>' : '') +
-          '<div class="show-m small" style="margin-top:6px">Custo: <b>' + brl4(num(i.custo_unitario)) + '</b> por ' + esc(i.unidade || 'un') + ' · Estoque: <b>' + fmt(num(i.estoque)) + ' ' + esc(i.unidade || '') + '</b><div class="row wrap" style="gap:8px;margin-top:6px">' + btnPac + comprar + '</div></div></td>' +
-          '<td class="num hide-m">' + brl4(num(i.custo_unitario)) + '</td>' +
-          '<td class="num hide-m">' + fmt(num(i.estoque)) + ' ' + esc(i.unidade || '') + (btnPac ? '<div style="margin-top:4px">' + btnPac + '</div>' : '') + '</td>' +
+          '<div class="show-m small" style="margin-top:6px">Custo: <b>' + brl(centavoAcima(num(i.custo_unitario))) + '</b> cada · Estoque: <b>' + fmt(num(i.estoque)) + ' ' + esc(un(i)) + '</b><div class="row wrap" style="gap:8px;margin-top:6px">' + btnPac + comprar + '</div></div></td>' +
+          '<td class="num hide-m">' + brl(centavoAcima(num(i.custo_unitario))) + '</td>' +
+          '<td class="num hide-m">' + fmt(num(i.estoque)) + ' ' + esc(un(i)) + (btnPac ? '<div style="margin-top:4px">' + btnPac + '</div>' : '') + '</td>' +
           '<td class="hide-m small muted">' + (uso.length ? esc(uso.slice(0, 3).join(', ') + (uso.length > 3 ? ' +' + (uso.length - 3) : '')) : '—') + '</td>' +
           '<td class="hide-m">' + comprar + '</td>' +
           '<td><button class="icon-btn" data-edit="' + i.id + '" aria-label="Editar insumo" title="Editar">' + ICON.edit + '</button></td></tr>';
@@ -931,10 +953,10 @@
       btnPac.classList.toggle('hidden', !(qt > 0));
       if (qt > 0) btnPac.textContent = 'Comprei mais um pacote (+' + fmt(qt) + ' no estoque)';
       if (pr > 0 && qt > 0) {
-        var u = pr / qt;
-        elUni.value = fmtIn(String(Math.round(u * 10000) / 10000));
-        calc.textContent = 'Calculado pelo pacote: ' + brl(pr) + ' ÷ ' + fmt(qt) + ' = ' + brl4(u) + ' por unidade.';
-      } else calc.textContent = 'Preencha o preço do pacote e quantas unidades vêm nele — ou digite direto o custo por unidade.';
+        var u = centavoAcima(pr / qt);
+        elUni.value = fmtIn(u.toFixed(2));
+        calc.textContent = 'Calculado pelo pacote: ' + brl(pr) + ' ÷ ' + fmt(qt) + ' unidades = ' + brl(u) + ' cada (arredondado para cima).';
+      } else calc.textContent = 'Preencha o preço do pacote e as unidades — ou digite direto o custo por unidade.';
     }
     elPac.addEventListener('input', doPacote);
     elQtd.addEventListener('input', doPacote);
@@ -958,9 +980,9 @@
         if (a === 'save') {
           var o = readFields(F_INS, m);
           if (!o.nome) return toast('Informe o nome', true);
-          if (o.custo_unitario === null) o.custo_unitario = 0;
+          o.custo_unitario = centavoAcima(o.custo_unitario || 0);
           if (o.estoque === null) o.estoque = 0;
-          o.unidade = o.unidade || 'un';
+          o.unidade = 'un';
           o.id = novoId;
           if (foto.mudou || foto.foto) o.foto = foto.foto;
           var r = q(await sb.from('insumos').upsert(o).select().single());
