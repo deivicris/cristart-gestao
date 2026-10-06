@@ -12,8 +12,8 @@
   var S = {
     user: null, membro: null, ready: false,
     cfg: null, plataformas: [], equipamentos: [], filamentos: [], insumos: [],
-    produtos: [], prodInsumos: [], anuncios: [], membros: [], carreteis: [],
-    ui: { prodBusca: '', prodCat: '', prodStatus: '', verArquivados: false, filOrd: 'restante', ord: {}, busca: {} }
+    produtos: [], prodInsumos: [], anuncios: [], membros: [], carreteis: [], impressoes: [], perdas: [], vendas: [],
+    ui: { prodBusca: '', prodCat: '', prodStatus: '', verArquivados: false, filOrd: 'restante', ord: {}, busca: {}, per: {}, vf: [] }
   };
 
   // ------------------------------------------------------------------ utilidades
@@ -329,7 +329,10 @@
       sb.from('produtos').select('*').order('ordem').order('criado_em'),
       sb.from('produto_insumos').select('*'),
       sb.from('produto_anuncios').select('*'),
-      sb.from('membros').select('*').order('criado_em')
+      sb.from('membros').select('*').order('criado_em'),
+      sb.from('impressoes').select('*').order('data', { ascending: false }).order('criado_em', { ascending: false }),
+      sb.from('perdas').select('*').order('data', { ascending: false }).order('criado_em', { ascending: false }),
+      sb.from('vendas').select('*').order('data', { ascending: false }).order('criado_em', { ascending: false })
     ]);
     S.cfg = q(r[0]) || {};
     S.plataformas = q(r[1]) || [];
@@ -340,6 +343,9 @@
     S.prodInsumos = q(r[6]) || [];
     S.anuncios = q(r[7]) || [];
     S.membros = q(r[8]) || [];
+    S.impressoes = q(r[9]) || [];
+    S.perdas = q(r[10]) || [];
+    S.vendas = q(r[11]) || [];
     var rc = await sb.from('carreteis').select('*');
     S.carreteis = rc.error ? [] : (rc.data || []);
     S.faltaScript04 = !!rc.error;
@@ -448,9 +454,9 @@
     { id: 'insumos', t: 'Insumos e extras' },
     { id: 'equipamentos', t: 'Equipamentos' },
     { sep: true },
-    { id: 'producao', t: 'Produção e perdas', soon: 'etapa 2' },
-    { id: 'vendas', t: 'Vendas', soon: 'etapa 2' },
-    { id: 'relatorios', t: 'Relatórios', soon: 'etapa 2' },
+    { id: 'vendas', t: 'Vendas' },
+    { id: 'producao', t: 'Produção e perdas' },
+    { id: 'relatorios', t: 'Relatórios' },
     { id: 'anuncios', t: 'Anúncios com IA', soon: 'etapa 3' },
     { sep: true },
     { id: 'config', t: 'Configurações' }
@@ -504,7 +510,10 @@
         case 'insumos': return telaInsumos(v);
         case 'equipamentos': return telaEquipamentos(v);
         case 'config': return telaConfig(v);
-        case 'producao': case 'vendas': case 'relatorios': case 'anuncios': return telaEmBreve(v, r.tela);
+        case 'producao': return telaProducao(v);
+        case 'vendas': return telaVendas(v);
+        case 'relatorios': return telaRelatorios(v);
+        case 'anuncios': return telaEmBreve(v, r.tela);
         default: go('#/painel');
       }
     } catch (e) {
@@ -515,7 +524,7 @@
 
   // ------------------------------------------------------------------ PAINEL
   function telaPainel(v) {
-    setHeader('Painel', '<a class="btn btn-p" href="#/produto/novo">+ <span class="long">Novo produto</span></a>');
+    setHeader('Painel', '<button class="btn btn-g" id="q-imp">+ <span class="long">Impressão</span></button><button class="btn btn-p" id="q-venda">+ <span class="long">Venda</span></button>');
     var ativos = S.produtos.filter(function (p) { return p.ativo; });
     var pecas = 0, valorCusto = 0, valorVenda = 0;
     ativos.forEach(function (p) {
@@ -540,13 +549,19 @@
     if (!S.equipamentos.length) alertas.push(['p-info', 'Começo', 'Cadastre as impressoras (com a potência em watts) para calcular a energia. <a href="#/equipamentos">Ir para Equipamentos</a>']);
     if (!S.produtos.length) alertas.push(['p-info', 'Começo', 'Importe o catálogo do site em <a href="#/config">Configurações</a>.']);
 
+    var d0 = new Date(), ivMes = { ini: hojeISO(new Date(d0.getFullYear(), d0.getMonth(), 1)), fim: hojeISO() };
+    var vMes = S.vendas.filter(function (x) { return noPeriodo(x.data, ivMes); });
+    var fatMes = vMes.reduce(function (a, x) { return a + (num(x.valor_total) || 0); }, 0);
+    var lucMes = vMes.reduce(function (a, x) { return a + lucroVenda(x); }, 0) - S.perdas.filter(function (x) { return noPeriodo(x.data, ivMes); }).reduce(function (a, x) { return a + custoPerda(x); }, 0);
+    var hMes = impressoras().reduce(function (a, e) { return a + horasRegistradas(e, ivMes); }, 0);
+    var ultimas = S.vendas.slice(0, 6);
     v.innerHTML =
       '<div class="stack">' +
       '<div class="grid g4">' +
-      kpi('Produtos ativos', ativos.length, S.produtos.length - ativos.length ? (S.produtos.length - ativos.length) + ' inativo(s)' : '') +
-      kpi('Peças em estoque', pecas, 'valem ' + brl(valorVenda) + ' em venda') +
-      kpi('Custo do estoque', brl(valorCusto), 'o que foi investido nas peças prontas') +
-      kpi('Filamento disponível', fmt(gramas / 1000, 2) + ' kg', rolos.length + ' rolo(s) em uso') +
+      kpi('Vendas no mês', brl(fatMes), vMes.length + ' venda(s)') +
+      kpi('Lucro no mês', brl(lucMes), 'já descontando as perdas') +
+      kpi('Peças em estoque', pecas, 'valem ' + brl(valorVenda) + ' · custaram ' + brl(valorCusto)) +
+      kpi('Filamento disponível', fmt(gramas / 1000, 2) + ' kg', rolos.length + ' rolo(s) · ' + fmt(hMes, 0) + ' h de máquina no mês') +
       '</div>' +
       '<div class="grid g2">' +
       '<div class="card"><h2>Alertas</h2>' + (alertas.length ? '<div class="stack" style="gap:10px">' + alertas.map(function (a) {
@@ -554,8 +569,12 @@
       }).join('') + '</div>' : '<div class="muted">Tudo em ordem por aqui. 👌</div>') + '</div>' +
       '<div class="card"><h2>Mais lucrativos por unidade</h2>' + topLucro() + '</div>' +
       '</div>' +
-      '<div class="note">Vendas, produção, perdas e relatórios por período chegam na <b>etapa 2</b>. Por enquanto, ajuste o estoque direto na ficha de cada produto.</div>' +
+      '<div class="card"><div class="row between"><h2 style="margin:0">Últimas vendas</h2><a class="small" href="#/vendas">ver todas</a></div>' + (ultimas.length ? '<div class="tbl-wrap" style="margin-top:8px"><table class="tbl"><thead><tr><th>Data</th><th>Produto</th><th class="hide-m">Canal</th><th class="num">Valor</th><th class="num">Lucro</th></tr></thead><tbody>' +
+        ultimas.map(function (x) { var l = lucroVenda(x); return '<tr><td>' + dataBR(x.data) + '</td><td>' + esc(nomeProduto(x.produto_id)) + (x.quantidade > 1 ? ' × ' + x.quantidade : '') + '</td><td class="hide-m">' + esc(nomePlat(x.plataforma_id)) + '</td><td class="num">' + brl(num(x.valor_total)) + '</td><td class="num" style="font-weight:700;color:' + (l < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + brl(l) + '</td></tr>'; }).join('') +
+        '</tbody></table></div>' : '<div class="muted small" style="margin-top:8px">Nenhuma venda registrada ainda. Use o botão “+ Venda” lá em cima.</div>') + '</div>' +
       '</div>';
+    $('#q-venda').addEventListener('click', function () { registrarVenda(); });
+    $('#q-imp').addEventListener('click', function () { registrarImpressao(); });
     v.onclick = function (e) {
       var t = e.target.closest('[data-preco-fil],[data-preco-ins]'); if (!t) return;
       e.preventDefault();
@@ -663,7 +682,11 @@
     var ads = {};
     S.anuncios.filter(function (a) { return a.produto_id === p.id; }).forEach(function (a) { ads[a.plataforma_id] = JSON.parse(JSON.stringify(a)); });
 
-    setHeader(novo ? 'Novo produto' : p.nome, '<a class="btn btn-g" href="#/produtos">Voltar</a>');
+    setHeader(novo ? 'Novo produto' : p.nome, (novo ? '' : '<button class="btn btn-g hide-m" id="pq-imp">+ Impressão</button><button class="btn btn-g hide-m" id="pq-venda">+ Venda</button>') + '<a class="btn btn-g" href="#/produtos">Voltar</a>');
+    if (!novo) {
+      $('#pq-imp').addEventListener('click', function () { if (dirty) return toast('Salve o produto antes', true); registrarImpressao(p.id); });
+      $('#pq-venda').addEventListener('click', function () { if (dirty) return toast('Salve o produto antes', true); registrarVenda(p.id); });
+    }
 
     var fBasico = [
       { k: 'nome', label: 'Nome do produto', span: 2 },
@@ -1384,7 +1407,12 @@
     var t = TIPOS_EQ.filter(function (x) { return x.v === e.tipo; })[0];
     return t ? t.t.replace(' (escrever qual)', '') : (e.tipo || '—');
   }
-  function horasTotais(e) { return num(e.horas_iniciais) || 0; } // etapa 2: + horas das impressões registradas
+  function horasRegistradas(e, iv) {
+    var min = 0;
+    S.impressoes.concat(S.perdas).forEach(function (x) { if (x.impressora_id === e.id && (!iv || noPeriodo(x.data, iv))) min += num(x.tempo_min) || 0; });
+    return min / 60;
+  }
+  function horasTotais(e) { return (num(e.horas_iniciais) || 0) + horasRegistradas(e); }
   var F_EQ = [
     { k: 'nome', label: 'Nome', span: 2, ph: 'ex.: Kobra 4 · #1' },
     { k: 'tipo', label: 'Tipo', type: 'select', opts: TIPOS_EQ },
@@ -1394,7 +1422,7 @@
     { k: 'valor_pago', label: 'Valor pago (R$)', type: 'num' },
     { k: 'data_compra', label: 'Data da compra', type: 'date' },
     { k: 'potencia_w', label: 'Consumo médio (W)', type: 'int', hint: 'Impressora 3D imprimindo PLA. Na dúvida: 120' },
-    { k: 'horas_iniciais', label: 'Horas totais', type: 'num', hint: 'Horas que ela já rodou' },
+    { k: 'horas_iniciais', label: 'Horas antes do sistema', type: 'num', hint: 'As impressões registradas somam sozinhas' },
     { k: 'link_compra', label: 'Link (peças / compra)', span: 2 },
     { k: 'observacoes', label: 'Observações', type: 'textarea', rows: 2, span: 4 }
   ];
@@ -1429,7 +1457,7 @@
             '<td class="hide-m"><span class="pill ' + s[0] + '">' + s[1] + '</span></td>' +
             '<td><button class="icon-btn" data-edit="' + e.id + '" aria-label="Editar equipamento" title="Editar">' + ICON.edit + '</button></td></tr>';
         }).join('') + '</tbody></table></div>' : (buscaE ? nadaAchado('equip') : '<div class="empty">Nenhum equipamento ainda. Comece pelas impressoras: Kobra X, Kobra 4 (×2) e A1 Mini.</div>')) + '</div>' +
-      '<div class="note">As horas por semana, quinzena e mês aparecem na <b>etapa 2</b>, quando as impressões começarem a ser registradas.</div></div>';
+      '<div class="note">As horas totais somam as horas que você informou com as impressões e perdas registradas. As horas por período ficam em <a href="#/relatorios">Relatórios</a>.</div></div>';
     $('#novo-eq').addEventListener('click', function () { editarEquip(null); });
     ligarBusca('equip');
     v.onclick = function (e) {
@@ -1456,7 +1484,8 @@
     var h = num(valor);
     if (h === null || h < 0) return toast('Digite as horas', true);
     try {
-      var r = q(await sb.from('equipamentos').update({ horas_iniciais: h }).eq('id', id).select().single());
+      var eq0 = byId(S.equipamentos, id);
+      var r = q(await sb.from('equipamentos').update({ horas_iniciais: Math.max(0, h - horasRegistradas(eq0)) }).eq('id', id).select().single());
       S.equipamentos = S.equipamentos.map(function (x) { return x.id === id ? r : x; });
       toast('Horas atualizadas: ' + fmt(h, 0) + ' h ✓');
       render();
@@ -1652,6 +1681,419 @@
       toast('A importação parou: ' + erroMsg(err), true);
     }
     btn.disabled = false;
+  }
+
+  // ================================================================== ETAPA 2
+  // ------------------------------------------------------------------ períodos
+  function hojeISO(d) { d = d || new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function diasAtras(n) { var d = new Date(); d.setDate(d.getDate() - n); return hojeISO(d); }
+  var PERIODOS = [
+    { v: 'hoje', t: 'Hoje' }, { v: 'semana', t: '7 dias' }, { v: 'quinzena', t: '15 dias' },
+    { v: 'mes', t: 'Este mês' }, { v: 'mes_passado', t: 'Mês passado' }, { v: 'ano', t: 'Este ano' },
+    { v: 'tudo', t: 'Tudo' }, { v: 'livre', t: 'Escolher datas' }
+  ];
+  function intervalo(chave) {
+    var p = S.ui.per[chave] || { v: 'mes' }, d = new Date();
+    switch (p.v) {
+      case 'hoje': return { ini: hojeISO(), fim: hojeISO() };
+      case 'semana': return { ini: diasAtras(6), fim: hojeISO() };
+      case 'quinzena': return { ini: diasAtras(14), fim: hojeISO() };
+      case 'mes': return { ini: hojeISO(new Date(d.getFullYear(), d.getMonth(), 1)), fim: hojeISO() };
+      case 'mes_passado': return { ini: hojeISO(new Date(d.getFullYear(), d.getMonth() - 1, 1)), fim: hojeISO(new Date(d.getFullYear(), d.getMonth(), 0)) };
+      case 'ano': return { ini: d.getFullYear() + '-01-01', fim: hojeISO() };
+      case 'livre': return { ini: p.ini || diasAtras(29), fim: p.fim || hojeISO() };
+      default: return { ini: '0000-01-01', fim: '9999-12-31' };
+    }
+  }
+  function noPeriodo(data, iv) { var x = String(data || '').slice(0, 10); return x >= iv.ini && x <= iv.fim; }
+  function periodoHtml(chave) {
+    var p = S.ui.per[chave] || { v: 'mes' };
+    var iv = intervalo(chave);
+    return '<div class="row wrap" style="gap:6px">' + PERIODOS.map(function (o) {
+      return '<button type="button" class="chip' + (o.v === p.v ? ' on' : '') + '" data-per="' + chave + ':' + o.v + '">' + esc(o.t) + '</button>';
+    }).join('') +
+      (p.v === 'livre' ? '<span class="row" style="gap:6px"><input class="inp" type="date" data-per-ini="' + chave + '" value="' + esc(iv.ini) + '" style="width:auto;min-height:40px" aria-label="De"><span class="muted">até</span><input class="inp" type="date" data-per-fim="' + chave + '" value="' + esc(iv.fim) + '" style="width:auto;min-height:40px" aria-label="Até"></span>' : '') +
+      '</div>';
+  }
+  function tratarPeriodo(e) { // devolve true se tratou o clique
+    var b = e.target.closest('[data-per]'); if (!b) return false;
+    var p = b.dataset.per.split(':'); var atual = S.ui.per[p[0]] || {};
+    S.ui.per[p[0]] = { v: p[1], ini: atual.ini, fim: atual.fim };
+    render(); return true;
+  }
+  function ligarDatasPeriodo(v) {
+    $$('[data-per-ini],[data-per-fim]', v).forEach(function (inp) {
+      inp.addEventListener('change', function () {
+        var ch = inp.dataset.perIni || inp.dataset.perFim; var p = S.ui.per[ch] || { v: 'livre' };
+        if (inp.dataset.perIni) p.ini = inp.value; else p.fim = inp.value;
+        S.ui.per[ch] = p; render();
+      });
+    });
+  }
+  function nomeProduto(id) { var p = byId(S.produtos, id); return p ? p.nome : '— sem produto —'; }
+  function nomeRolo(id) { var f = byId(S.filamentos, id); return f ? f.tipo + ' ' + f.cor : '—'; }
+  function nomeEquip(id) { var e = byId(S.equipamentos, id); return e ? e.nome : '—'; }
+  function nomePlat(id) { var p = byId(S.plataformas, id); return p ? p.nome : (id || '—'); }
+  function grRolo(f) { return f && num(f.preco_pago) && num(f.peso_inicial_g) ? num(f.preco_pago) / num(f.peso_inicial_g) : null; }
+  function custoPerda(x) {
+    var f = byId(S.filamentos, x.filamento_id);
+    var g = grRolo(f); if (g === null) g = custoGrama(f ? f.tipo : null).v;
+    return (num(x.gramas) || 0) * g;
+  }
+  function lucroVenda(v) { return (num(v.valor_total) || 0) - (num(v.taxa) || 0) - (num(v.custo_unitario) || 0) * (v.quantidade || 0); }
+  async function recarregar(tabelas) {
+    var map = { produtos: ['produtos', 'ordem'], filamentos: ['filamentos', 'criado_em'], insumos: ['insumos', 'nome'] };
+    var rs = await Promise.all(tabelas.map(function (t) { return sb.from(map[t][0]).select('*').order(map[t][1]); }));
+    rs.forEach(function (r, i) { S[tabelas[i]] = q(r) || []; });
+  }
+  function selProdutos(sel, vazio) {
+    var lista = S.produtos.filter(function (p) { return p.ativo || p.id === sel; }).slice().sort(function (a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); });
+    return (vazio ? '<option value="">' + esc(vazio) + '</option>' : '') + lista.map(function (p) {
+      return '<option value="' + p.id + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(p.nome) + (p.estoque > 0 ? ' (' + p.estoque + ' em estoque)' : '') + '</option>';
+    }).join('');
+  }
+  function selRolos(sel, vazio, material) {
+    var ativos = S.filamentos.filter(function (f) { return !f.arquivado || f.id === sel; });
+    var mat = norm(material || '');
+    ativos.sort(function (a, b) { var ma = norm(a.tipo) === mat ? 0 : 1, mb = norm(b.tipo) === mat ? 0 : 1; return ma - mb || (a.tipo + a.cor).localeCompare(b.tipo + b.cor, 'pt-BR'); });
+    return '<option value="">' + esc(vazio) + '</option>' + ativos.map(function (f) {
+      return '<option value="' + f.id + '"' + (f.id === sel ? ' selected' : '') + '>' + esc(f.tipo + ' ' + f.cor + (f.marca ? ' · ' + f.marca : '')) + ' (~' + fmt(num(f.restante_g), 0) + ' g)</option>';
+    }).join('');
+  }
+  function selImpressoras(sel, vazio) {
+    return '<option value="">' + esc(vazio) + '</option>' + impressoras().map(function (e) { return '<option value="' + e.id + '"' + (e.id === sel ? ' selected' : '') + '>' + esc(e.nome) + '</option>'; }).join('');
+  }
+  function tempoHtml(id, min) {
+    var h = min ? Math.floor(min / 60) : '', m = min ? Math.round(min % 60) : '';
+    return '<div class="row" style="gap:6px"><input class="inp" id="' + id + '-h" inputmode="numeric" value="' + esc(h) + '" aria-label="horas" style="min-width:0"><span class="muted">h</span><input class="inp" id="' + id + '-m" inputmode="numeric" value="' + esc(m) + '" aria-label="minutos" style="min-width:0"><span class="muted">min</span></div>';
+  }
+  function lerTempo(root, id) { var h = num($('#' + id + '-h', root).value) || 0, m = num($('#' + id + '-m', root).value) || 0; return (h || m) ? Math.round(h * 60 + m) : null; }
+  function setTempo(root, id, min) { $('#' + id + '-h', root).value = min ? Math.floor(min / 60) : ''; $('#' + id + '-m', root).value = min ? Math.round(min % 60) : ''; }
+  var BTN_DEL = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>';
+
+  // ------------------------------------------------------------------ PRODUÇÃO E PERDAS
+  var MOTIVOS = ['Purga / limpeza', 'Falha de impressão', 'Peça com defeito', 'Teste / calibração', 'Outro'];
+  function telaProducao(v) {
+    setHeader('Produção e perdas', '<button class="btn btn-g" id="nova-perda">+ <span class="long">Perda</span></button><button class="btn btn-p" id="nova-imp">+ <span class="long">Impressão</span></button>');
+    var iv = intervalo('prod');
+    var busca = S.ui.busca.producao || '';
+    var imps = S.impressoes.filter(function (x) { return noPeriodo(x.data, iv) && combina([nomeProduto(x.produto_id), nomeEquip(x.impressora_id), nomeRolo(x.filamento_id), x.observacoes], busca); });
+    var perdas = S.perdas.filter(function (x) { return noPeriodo(x.data, iv) && combina([nomeRolo(x.filamento_id), nomeEquip(x.impressora_id), x.motivo], busca); });
+    var pecas = imps.reduce(function (a, x) { return a + (x.produto_id ? x.quantidade : 0); }, 0);
+    var minutos = imps.reduce(function (a, x) { return a + (num(x.tempo_min) || 0); }, 0) + perdas.reduce(function (a, x) { return a + (num(x.tempo_min) || 0); }, 0);
+    var gUsado = imps.reduce(function (a, x) { return a + (num(x.gramas) || 0); }, 0);
+    var gPerda = perdas.reduce(function (a, x) { return a + (num(x.gramas) || 0); }, 0);
+    var rPerda = perdas.reduce(function (a, x) { return a + custoPerda(x); }, 0);
+    var tot = gUsado + gPerda;
+    v.innerHTML = '<div class="stack">' + periodoHtml('prod') +
+      '<div class="grid g4">' + kpi('Peças impressas', pecas, imps.length + ' impressão(ões)') + kpi('Horas de máquina', fmt(minutos / 60, 1) + ' h', 'impressões + perdas') +
+      kpi('Filamento usado', fmt(gUsado / 1000, 2) + ' kg', 'nas peças') + kpi('Perdas', brl(rPerda), fmt(gPerda, 0) + ' g' + (tot ? ' · ' + fmt(gPerda / tot * 100, 0) + '% do filamento' : '')) + '</div>' +
+      buscaHtml('producao', 'Pesquisar: produto, impressora, rolo, motivo…') +
+      '<div class="card" style="padding:6px 8px"><div class="row between" style="padding:10px 10px 4px"><h2 style="margin:0">Impressões</h2></div>' +
+      (imps.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Data</th><th>Produto</th><th class="num">Qtd</th><th class="hide-m">Impressora</th><th class="hide-m">Rolo</th><th class="num hide-m">Tempo</th><th class="num hide-m">Filamento</th><th></th></tr></thead><tbody>' +
+        imps.map(function (x) {
+          return '<tr><td>' + dataBR(x.data) + '</td><td><div style="font-weight:700">' + esc(nomeProduto(x.produto_id)) + '</div><div class="show-m small muted">' + esc(nomeEquip(x.impressora_id)) + ' · ' + horas(x.tempo_min) + ' · ' + fmt(num(x.gramas) || 0, 0) + ' g</div>' + (x.observacoes ? '<div class="small muted">' + esc(x.observacoes) + '</div>' : '') + '</td>' +
+            '<td class="num">' + x.quantidade + '</td><td class="hide-m">' + esc(nomeEquip(x.impressora_id)) + '</td><td class="hide-m">' + esc(nomeRolo(x.filamento_id)) + '</td>' +
+            '<td class="num hide-m">' + horas(x.tempo_min) + '</td><td class="num hide-m">' + (x.gramas ? fmt(num(x.gramas), 0) + ' g' : '—') + '</td>' +
+            '<td><button class="icon-btn" data-del-imp="' + x.id + '" aria-label="Excluir impressão" title="Excluir (desfaz o estoque)">' + BTN_DEL + '</button></td></tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty">' + (busca ? 'Nada encontrado.' : 'Nenhuma impressão neste período. Clique em “+ Impressão” quando uma peça sair da máquina.') + '</div>') + '</div>' +
+      '<div class="card" style="padding:6px 8px"><div class="row between" style="padding:10px 10px 4px"><h2 style="margin:0">Perdas</h2><span class="small muted">purga, falha, peça errada…</span></div>' +
+      (perdas.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Data</th><th>Motivo</th><th class="num">Peso</th><th class="hide-m">Rolo</th><th class="hide-m">Impressora</th><th class="num hide-m">Tempo</th><th class="num">Custo</th><th></th></tr></thead><tbody>' +
+        perdas.map(function (x) {
+          return '<tr><td>' + dataBR(x.data) + '</td><td>' + esc(x.motivo || '—') + '<div class="show-m small muted">' + esc(nomeRolo(x.filamento_id)) + '</div></td><td class="num">' + (x.gramas ? fmt(num(x.gramas), 0) + ' g' : '—') + '</td>' +
+            '<td class="hide-m">' + esc(nomeRolo(x.filamento_id)) + '</td><td class="hide-m">' + esc(nomeEquip(x.impressora_id)) + '</td><td class="num hide-m">' + horas(x.tempo_min) + '</td>' +
+            '<td class="num">' + brl(custoPerda(x)) + '</td><td><button class="icon-btn" data-del-perda="' + x.id + '" aria-label="Excluir perda" title="Excluir (devolve ao rolo)">' + BTN_DEL + '</button></td></tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty">' + (busca ? 'Nada encontrado.' : 'Nenhuma perda neste período. 👌') + '</div>') + '</div>' +
+      '</div>';
+    $('#nova-imp').addEventListener('click', function () { registrarImpressao(); });
+    $('#nova-perda').addEventListener('click', function () { registrarPerda(); });
+    ligarBusca('producao'); ligarDatasPeriodo(v);
+    v.onclick = async function (e) {
+      if (tratarPeriodo(e)) return;
+      var b;
+      if ((b = e.target.closest('[data-del-imp]'))) {
+        var x = byId(S.impressoes, b.dataset.delImp);
+        if (!(await confirmar('Excluir impressão?', 'Isso desfaz o que ela fez: tira ' + x.quantidade + ' peça(s) do estoque de “' + nomeProduto(x.produto_id) + '” e devolve ' + fmt(num(x.gramas) || 0, 0) + ' g ao rolo.', 'Excluir', true))) return;
+        try { q(await sb.from('impressoes').delete().eq('id', x.id)); S.impressoes = S.impressoes.filter(function (y) { return y.id !== x.id; }); await recarregar(['produtos', 'filamentos']); toast('Impressão excluída e desfeita ✓'); render(); } catch (err) { toast(erroMsg(err), true); }
+      }
+      if ((b = e.target.closest('[data-del-perda]'))) {
+        var p = byId(S.perdas, b.dataset.delPerda);
+        if (!(await confirmar('Excluir perda?', 'As ' + fmt(num(p.gramas) || 0, 0) + ' g voltam para o rolo.', 'Excluir', true))) return;
+        try { q(await sb.from('perdas').delete().eq('id', p.id)); S.perdas = S.perdas.filter(function (y) { return y.id !== p.id; }); await recarregar(['filamentos']); toast('Perda excluída ✓'); render(); } catch (err) { toast(erroMsg(err), true); }
+      }
+    };
+  }
+  function registrarImpressao(produtoId) {
+    var p0 = produtoId ? byId(S.produtos, produtoId) : null;
+    var m = modal('<div class="row between"><h2>Registrar impressão</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
+      '<div class="grid g2">' +
+      '<div class="field" style="grid-column:1 / -1"><label for="ri-prod">Produto</label><select class="inp" id="ri-prod">' + selProdutos(produtoId || '', '— sem produto (teste, brinde…) —') + '</select></div>' +
+      '<div class="field"><label for="ri-qtd">Quantidade de peças</label><input class="inp" id="ri-qtd" inputmode="numeric" value="1"></div>' +
+      '<div class="field"><label for="ri-data">Data</label><input class="inp" type="date" id="ri-data" value="' + hojeISO() + '"></div>' +
+      '<div class="field"><label for="ri-imp">Impressora</label><select class="inp" id="ri-imp">' + selImpressoras(p0 && p0.impressora_padrao, '— não informar —') + '</select></div>' +
+      '<div class="field"><label for="ri-rolo">Rolo usado</label><select class="inp" id="ri-rolo">' + selRolos('', '— não informar —', p0 && p0.material) + '</select></div>' +
+      '<div class="field"><label>Tempo total</label>' + tempoHtml('ri-t', null) + '<div class="hint" id="ri-t-hint"></div></div>' +
+      '<div class="field"><label for="ri-g">Filamento total (g)</label><input class="inp" id="ri-g" inputmode="decimal"><div class="hint" id="ri-g-hint"></div></div>' +
+      '<div class="field" style="grid-column:1 / -1"><label for="ri-obs">Observação (opcional)</label><input class="inp" id="ri-obs" placeholder="ex.: cor branca, lote do pedido da Maria"></div>' +
+      '</div><div class="note" id="ri-prev"></div>' +
+      '<div class="row" style="justify-content:flex-end"><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Registrar</button></div>');
+    var mexeuT = false, mexeuG = false;
+    function auto() {
+      var p = byId(S.produtos, $('#ri-prod', m).value), qtd = Math.max(1, Math.round(num($('#ri-qtd', m).value) || 1));
+      if (p && !mexeuT && p.tempo_min) { setTempo(m, 'ri-t', p.tempo_min * qtd); $('#ri-t-hint', m).textContent = horas(p.tempo_min) + ' por peça × ' + qtd; }
+      if (p && !mexeuG && num(p.gramas)) { $('#ri-g', m).value = fmtIn(String(Math.round(num(p.gramas) * qtd * 10) / 10)); $('#ri-g-hint', m).textContent = fmt(num(p.gramas), 1) + ' g por peça × ' + qtd; }
+      prev();
+    }
+    function prev() {
+      var p = byId(S.produtos, $('#ri-prod', m).value), qtd = Math.max(1, Math.round(num($('#ri-qtd', m).value) || 1));
+      var f = byId(S.filamentos, $('#ri-rolo', m).value), g = num($('#ri-g', m).value) || 0;
+      var linhas = [];
+      if (p) linhas.push('Estoque de <b>' + esc(p.nome) + '</b>: ' + (p.estoque || 0) + ' → <b>' + ((p.estoque || 0) + qtd) + '</b>');
+      if (f && g) linhas.push('Rolo <b>' + esc(f.tipo + ' ' + f.cor) + '</b>: ' + fmt(num(f.restante_g), 0) + ' g → <b>' + fmt(Math.max(0, num(f.restante_g) - g), 0) + ' g</b>');
+      $('#ri-prev', m).innerHTML = linhas.length ? linhas.join('<br>') : 'Escolha o produto e o rolo para ver o que muda.';
+    }
+    $('#ri-prod', m).addEventListener('change', function () {
+      var p = byId(S.produtos, this.value);
+      if (p) { if (p.impressora_padrao) $('#ri-imp', m).value = p.impressora_padrao; $('#ri-rolo', m).innerHTML = selRolos($('#ri-rolo', m).value, '— não informar —', p.material); }
+      mexeuT = false; mexeuG = false; auto();
+    });
+    $('#ri-qtd', m).addEventListener('input', auto);
+    $('#ri-rolo', m).addEventListener('change', prev);
+    $('#ri-g', m).addEventListener('input', function () { mexeuG = true; $('#ri-g-hint', m).textContent = ''; prev(); });
+    ['#ri-t-h', '#ri-t-m'].forEach(function (s) { $(s, m).addEventListener('input', function () { mexeuT = true; $('#ri-t-hint', m).textContent = ''; }); });
+    auto();
+    m.addEventListener('click', async function (e) {
+      var b = e.target.closest('[data-x]'); if (!b) return;
+      if (b.dataset.x === 'close') return closeModal();
+      var o = {
+        data: $('#ri-data', m).value || hojeISO(), produto_id: $('#ri-prod', m).value || null,
+        quantidade: Math.max(1, Math.round(num($('#ri-qtd', m).value) || 1)),
+        impressora_id: $('#ri-imp', m).value || null, filamento_id: $('#ri-rolo', m).value || null,
+        tempo_min: lerTempo(m, 'ri-t'), gramas: num($('#ri-g', m).value), observacoes: $('#ri-obs', m).value.trim() || null
+      };
+      b.disabled = true;
+      try {
+        var r = q(await sb.from('impressoes').insert(o).select().single());
+        S.impressoes.unshift(r);
+        await recarregar(['produtos', 'filamentos']);
+        closeModal(); toast('Impressão registrada ✓' + (o.produto_id ? ' Estoque +' + o.quantidade : '')); render();
+      } catch (err) { b.disabled = false; toast(erroMsg(err), true); }
+    });
+  }
+  function registrarPerda() {
+    var m = modal('<div class="row between"><h2>Registrar perda</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
+      '<div class="small muted" style="margin-top:-6px">Preenche o que tiver — nada é obrigatório.</div>' +
+      '<div class="grid g2">' +
+      '<div class="field"><label for="rp-g">Peso (g)</label><input class="inp" id="rp-g" inputmode="decimal" placeholder="ex.: 24"></div>' +
+      '<div class="field"><label for="rp-mot">Motivo</label><select class="inp" id="rp-mot"><option value="">—</option>' + MOTIVOS.map(function (x) { return '<option>' + esc(x) + '</option>'; }).join('') + '</select></div>' +
+      '<div class="field"><label for="rp-rolo">Rolo</label><select class="inp" id="rp-rolo">' + selRolos('', '— não sei / vários —') + '</select></div>' +
+      '<div class="field"><label for="rp-imp">Impressora</label><select class="inp" id="rp-imp">' + selImpressoras('', '— não informar —') + '</select></div>' +
+      '<div class="field"><label>Tempo de máquina</label>' + tempoHtml('rp-t', null) + '</div>' +
+      '<div class="field"><label for="rp-data">Data</label><input class="inp" type="date" id="rp-data" value="' + hojeISO() + '"></div>' +
+      '</div>' +
+      '<div class="row" style="justify-content:flex-end"><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Salvar perda</button></div>', { size: 'sm' });
+    m.addEventListener('click', async function (e) {
+      var b = e.target.closest('[data-x]'); if (!b) return;
+      if (b.dataset.x === 'close') return closeModal();
+      var o = { data: $('#rp-data', m).value || hojeISO(), gramas: num($('#rp-g', m).value), filamento_id: $('#rp-rolo', m).value || null, impressora_id: $('#rp-imp', m).value || null, tempo_min: lerTempo(m, 'rp-t'), motivo: $('#rp-mot', m).value || null };
+      if (!o.gramas && !o.tempo_min && !o.motivo) return toast('Preencha pelo menos o peso, o tempo ou o motivo', true);
+      b.disabled = true;
+      try {
+        var r = q(await sb.from('perdas').insert(o).select().single());
+        S.perdas.unshift(r);
+        if (o.filamento_id) await recarregar(['filamentos']);
+        closeModal(); toast('Perda registrada ✓'); render();
+      } catch (err) { b.disabled = false; toast(erroMsg(err), true); }
+    });
+  }
+
+  // ------------------------------------------------------------------ VENDAS
+  var PAGAMENTOS = ['Pix', 'Cartão de crédito', 'Cartão de débito', 'Dinheiro', 'Pago pela plataforma'];
+  function telaVendas(v) {
+    setHeader('Vendas', '<button class="btn btn-p" id="nova-venda">+ <span class="long">Registrar venda</span></button>');
+    var iv = intervalo('vendas');
+    var busca = S.ui.busca.vendas || '';
+    var noPer = S.vendas.filter(function (x) { return noPeriodo(x.data, iv); });
+    var vf = S.ui.vf || [];
+    var canais = S.plataformas.filter(function (pl) { return pl.ativa || noPer.some(function (x) { return x.plataforma_id === pl.id; }); });
+    var lista = noPer.filter(function (x) { return (!vf.length || vf.indexOf(x.plataforma_id) >= 0) && combina([nomeProduto(x.produto_id), nomePlat(x.plataforma_id), x.pagamento, x.cliente, x.opcao, x.observacoes], busca); });
+    var soma = function (arr, fn) { return arr.reduce(function (a, x) { return a + fn(x); }, 0); };
+    var fat = soma(lista, function (x) { return num(x.valor_total) || 0; }), tax = soma(lista, function (x) { return num(x.taxa) || 0; });
+    var cus = soma(lista, function (x) { return (num(x.custo_unitario) || 0) * x.quantidade; }), luc = fat - tax - cus;
+    v.innerHTML = '<div class="stack">' + periodoHtml('vendas') +
+      '<div class="grid g4">' + kpi('Faturamento', brl(fat), lista.length + ' venda(s)') + kpi('Lucro', brl(luc), fat ? 'margem ' + fmt(luc / fat * 100, 0) + '% do faturamento' : '') +
+      kpi('Taxas', brl(tax), 'plataformas e cartão') + kpi('Ticket médio', brl(lista.length ? fat / lista.length : 0), soma(lista, function (x) { return x.quantidade; }) + ' peça(s)') + '</div>' +
+      '<div class="small muted">Clique nas plataformas para filtrar — uma para ver sozinha, várias para comparar.</div>' +
+      '<div class="canais">' + canais.map(function (pl) {
+        var vs = noPer.filter(function (x) { return x.plataforma_id === pl.id; }), on = vf.indexOf(pl.id) >= 0;
+        return '<button type="button" class="canal' + (on ? ' on' : '') + (vf.length && !on ? ' off' : '') + '" data-canal="' + pl.id + '" aria-pressed="' + on + '"><span class="lbl">' + esc(pl.nome) + '</span><span class="v">' + brl(soma(vs, function (x) { return num(x.valor_total) || 0; })) + '</span><span class="small muted">' + vs.length + ' venda(s) · lucro ' + brl(soma(vs, lucroVenda)) + '</span></button>';
+      }).join('') + (vf.length ? '<button type="button" class="btn btn-g btn-s" data-canal-limpar>Limpar filtro</button>' : '') + '</div>' +
+      buscaHtml('vendas', 'Pesquisar: produto, cliente, Pix…') +
+      '<div class="card" style="padding:6px 8px">' + (lista.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Data</th><th>Produto</th><th class="num">Qtd</th><th class="hide-m">Canal</th><th class="hide-m">Pagamento</th><th class="num">Valor</th><th class="num hide-m">Taxa</th><th class="num hide-m">Custo</th><th class="num">Lucro</th><th></th></tr></thead><tbody>' +
+        lista.map(function (x) {
+          var l = lucroVenda(x);
+          return '<tr><td>' + dataBR(x.data) + '</td><td><div style="font-weight:700">' + esc(nomeProduto(x.produto_id)) + '</div><div class="small muted">' + esc([x.opcao, x.cliente].filter(Boolean).join(' · ')) + (x.baixa_estoque ? '' : ' <span class="pill p-info">encomenda</span>') + '</div><div class="show-m small muted">' + esc(nomePlat(x.plataforma_id) + ' · ' + (x.pagamento || '')) + '</div></td>' +
+            '<td class="num">' + x.quantidade + '</td><td class="hide-m">' + esc(nomePlat(x.plataforma_id)) + '</td><td class="hide-m">' + esc(x.pagamento || '—') + '</td>' +
+            '<td class="num">' + brl(num(x.valor_total)) + '</td><td class="num hide-m">' + (num(x.taxa) ? brl(num(x.taxa)) : '—') + '</td><td class="num hide-m">' + brl((num(x.custo_unitario) || 0) * x.quantidade) + '</td>' +
+            '<td class="num" style="font-weight:700;color:' + (l < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + brl(l) + '</td>' +
+            '<td><button class="icon-btn" data-del-venda="' + x.id + '" aria-label="Excluir venda" title="Excluir (devolve ao estoque)">' + BTN_DEL + '</button></td></tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty">' + (noPer.length ? 'Nada encontrado com esse filtro.' : 'Nenhuma venda neste período. Clique em “+ Registrar venda”.') + '</div>') + '</div></div>';
+    $('#nova-venda').addEventListener('click', function () { registrarVenda(); });
+    ligarBusca('vendas'); ligarDatasPeriodo(v);
+    v.onclick = async function (e) {
+      if (tratarPeriodo(e)) return;
+      var b;
+      if (e.target.closest('[data-canal-limpar]')) { S.ui.vf = []; return render(); }
+      if ((b = e.target.closest('[data-canal]'))) { var a = (S.ui.vf || []).slice(), i = a.indexOf(b.dataset.canal); if (i >= 0) a.splice(i, 1); else a.push(b.dataset.canal); S.ui.vf = a; return render(); }
+      if ((b = e.target.closest('[data-del-venda]'))) {
+        var x = byId(S.vendas, b.dataset.delVenda);
+        if (!(await confirmar('Excluir venda?', 'A venda sai dos relatórios' + (x.baixa_estoque ? ' e ' + x.quantidade + ' peça(s) voltam ao estoque' : '') + (x.baixa_insumos ? ', junto com os insumos' : '') + '.', 'Excluir', true))) return;
+        try { q(await sb.from('vendas').delete().eq('id', x.id)); S.vendas = S.vendas.filter(function (y) { return y.id !== x.id; }); await recarregar(['produtos', 'insumos']); toast('Venda excluída ✓'); render(); } catch (err) { toast(erroMsg(err), true); }
+      }
+    };
+  }
+  function registrarVenda(produtoId) {
+    var platOpts = S.plataformas.filter(function (pl) { return pl.ativa; }).map(function (pl) { return '<option value="' + pl.id + '">' + esc(pl.nome) + '</option>'; }).join('');
+    var m = modal('<div class="row between"><h2>Registrar venda</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
+      '<div class="grid g2">' +
+      '<div class="field" style="grid-column:1 / -1"><label for="rv-prod">Produto</label><select class="inp" id="rv-prod">' + selProdutos(produtoId || '', '— escolher —') + '</select></div>' +
+      '<div class="field hidden" id="rv-op-box"><label for="rv-op">Opção</label><select class="inp" id="rv-op"></select></div>' +
+      '<div class="field"><label for="rv-qtd">Quantidade</label><input class="inp" id="rv-qtd" inputmode="numeric" value="1"></div>' +
+      '<div class="field"><label for="rv-canal">Canal</label><select class="inp" id="rv-canal">' + platOpts + '</select></div>' +
+      '<div class="field"><label for="rv-pag">Pagamento</label><select class="inp" id="rv-pag">' + PAGAMENTOS.map(function (x) { return '<option>' + esc(x) + '</option>'; }).join('') + '</select></div>' +
+      '<div class="field"><label for="rv-valor">Valor total recebido (R$)</label><input class="inp" id="rv-valor" inputmode="decimal"><div class="hint" id="rv-valor-hint"></div></div>' +
+      '<div class="field"><label for="rv-taxa">Taxa (R$)</label><input class="inp" id="rv-taxa" inputmode="decimal"><div class="hint" id="rv-taxa-hint"></div></div>' +
+      '<div class="field"><label for="rv-data">Data</label><input class="inp" type="date" id="rv-data" value="' + hojeISO() + '"></div>' +
+      '<div class="field"><label for="rv-cli">Cliente (opcional)</label><input class="inp" id="rv-cli"></div>' +
+      '<div style="grid-column:1 / -1" class="stack" id="rv-checks"></div>' +
+      '</div><div class="cost-box" id="rv-prev"></div>' +
+      '<div class="row" style="justify-content:flex-end"><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Registrar venda</button></div>');
+    var mexeuV = false, mexeuT = false;
+    function precoUnit(p, canal, pag) {
+      var ad = S.anuncios.filter(function (a) { return a.produto_id === p.id && a.plataforma_id === canal; })[0];
+      if (ad && num(ad.preco)) return { v: num(ad.preco), de: 'preço anunciado em ' + nomePlat(canal) };
+      if (/crédito/.test(pag) && num(p.preco_cartao)) return { v: num(p.preco_cartao), de: 'preço no cartão' };
+      return { v: num(p.preco) || 0, de: 'preço Pix / site' };
+    }
+    function calcTaxa(valor, canal, pag) {
+      var pl = byId(S.plataformas, canal) || {}, pct = num(pl.taxa_pct) || 0, fixa = num(pl.taxa_fixa) || 0;
+      if (!pct && !fixa && /cartão/i.test(pag)) { pct = num(S.cfg.taxa_cartao_pct) || 0; return { v: valor * pct / 100, de: 'maquininha ' + fmt(pct) + '%' }; }
+      if (!pct && !fixa) return { v: 0, de: 'sem taxa' };
+      return { v: valor * pct / 100 + fixa, de: nomePlat(canal) + ': ' + fmt(pct) + '%' + (fixa ? ' + ' + brl(fixa) : '') };
+    }
+    function prodMudou() {
+      var p = byId(S.produtos, $('#rv-prod', m).value);
+      var ops = p && p.opcoes && p.opcoes[0] && p.opcoes[0].choices && p.opcoes[0].choices.length ? p.opcoes[0] : null;
+      $('#rv-op-box', m).classList.toggle('hidden', !ops);
+      if (ops) { $('label[for="rv-op"]', m).textContent = ops.name || 'Opção'; $('#rv-op', m).innerHTML = '<option value="">—</option>' + ops.choices.map(function (c) { return '<option>' + esc(c) + '</option>'; }).join(''); }
+      var temIns = p && S.prodInsumos.some(function (x) { return x.produto_id === p.id; });
+      var qtd = Math.max(1, Math.round(num($('#rv-qtd', m).value) || 1));
+      $('#rv-checks', m).innerHTML = p ?
+        '<label class="check"><input type="checkbox" id="rv-est"' + ((p.estoque || 0) >= qtd ? ' checked' : '') + '> Saiu do estoque (pronta entrega) — ' + (p.estoque || 0) + ' em estoque</label>' +
+        '<div class="hint" style="margin:-6px 0 0 28px">Desmarque se for <b>encomenda</b> (vai imprimir agora; registre a impressão depois).</div>' +
+        (temIns ? '<label class="check"><input type="checkbox" id="rv-ins" checked> Dar baixa nos insumos (' + esc(S.prodInsumos.filter(function (x) { return x.produto_id === p.id; }).map(function (x) { var i = byId(S.insumos, x.insumo_id); return i ? i.nome : ''; }).filter(Boolean).join(', ')) + ')</label>' : '') : '';
+      $$('#rv-checks input', m).forEach(function (c) { c.addEventListener('change', recalc); });
+      mexeuV = false; mexeuT = false; recalc();
+    }
+    function recalc() {
+      var p = byId(S.produtos, $('#rv-prod', m).value);
+      var qtd = Math.max(1, Math.round(num($('#rv-qtd', m).value) || 1)), canal = $('#rv-canal', m).value, pag = $('#rv-pag', m).value;
+      if (!p) { $('#rv-prev', m).innerHTML = '<span class="muted">Escolha o produto.</span>'; return; }
+      if (!mexeuV) { var pu = precoUnit(p, canal, pag); $('#rv-valor', m).value = fmtIn((pu.v * qtd).toFixed(2)); $('#rv-valor-hint', m).textContent = brl(pu.v) + ' × ' + qtd + ' (' + pu.de + ')'; }
+      var valor = num($('#rv-valor', m).value) || 0;
+      if (!mexeuT) { var tx = calcTaxa(valor, canal, pag); $('#rv-taxa', m).value = fmtIn(tx.v.toFixed(2)); $('#rv-taxa-hint', m).textContent = tx.de; }
+      var taxa = num($('#rv-taxa', m).value) || 0;
+      var c = custoProduto(p); c.total = Math.round(c.total * 100) / 100; // mesmo arredondamento que é gravado
+      var l = valor - taxa - c.total * qtd;
+      var est = $('#rv-est', m);
+      $('#rv-prev', m).innerHTML = '<div class="row between"><span>Recebido</span><span>' + brl(valor) + '</span></div>' +
+        '<div class="row between"><span>Taxa</span><span>− ' + brl(taxa) + '</span></div>' +
+        '<div class="row between"><span>Custo (' + qtd + ' × ' + brl(c.total) + ')</span><span>− ' + brl(c.total * qtd) + '</span></div>' +
+        '<div class="row between tot"><span>Lucro</span><span style="color:' + (l < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + brl(l) + '</span></div>' +
+        (c.avisos.length ? '<div class="hint">Custo estimado — ' + esc(c.avisos.join(', ').toLowerCase()) + ' na ficha do produto.</div>' : '') +
+        (est && est.checked ? '<div class="hint">Estoque: ' + (p.estoque || 0) + ' → ' + Math.max(0, (p.estoque || 0) - qtd) + (p.estoque - qtd <= 0 ? ' (o site passa a mostrar “Sob encomenda”)' : '') + '</div>' : '');
+    }
+    $('#rv-prod', m).addEventListener('change', prodMudou);
+    $('#rv-qtd', m).addEventListener('input', function () { prodMudou(); });
+    $('#rv-canal', m).addEventListener('change', function () { mexeuV = false; mexeuT = false; recalc(); });
+    $('#rv-pag', m).addEventListener('change', function () { var c = $('#rv-canal', m).value; if ($('#rv-pag', m).value === 'Pago pela plataforma' && c === 'site') {} mexeuV = false; mexeuT = false; recalc(); });
+    $('#rv-valor', m).addEventListener('input', function () { mexeuV = true; $('#rv-valor-hint', m).textContent = 'digitado'; recalc(); });
+    $('#rv-taxa', m).addEventListener('input', function () { mexeuT = true; $('#rv-taxa-hint', m).textContent = 'digitado'; recalc(); });
+    prodMudou();
+    m.addEventListener('click', async function (e) {
+      var b = e.target.closest('[data-x]'); if (!b) return;
+      if (b.dataset.x === 'close') return closeModal();
+      var p = byId(S.produtos, $('#rv-prod', m).value);
+      if (!p) return toast('Escolha o produto', true);
+      var qtd = Math.max(1, Math.round(num($('#rv-qtd', m).value) || 1));
+      var o = {
+        data: $('#rv-data', m).value || hojeISO(), produto_id: p.id, quantidade: qtd, plataforma_id: $('#rv-canal', m).value || null,
+        pagamento: $('#rv-pag', m).value, valor_total: num($('#rv-valor', m).value) || 0, taxa: num($('#rv-taxa', m).value) || 0,
+        custo_unitario: Math.round(custoProduto(p).total * 100) / 100,
+        baixa_estoque: !!($('#rv-est', m) && $('#rv-est', m).checked), baixa_insumos: !!($('#rv-ins', m) && $('#rv-ins', m).checked),
+        cliente: $('#rv-cli', m).value.trim() || null, opcao: $('#rv-op', m).value || null
+      };
+      b.disabled = true;
+      try {
+        var r = q(await sb.from('vendas').insert(o).select().single());
+        S.vendas.unshift(r);
+        await recarregar(['produtos', 'insumos']);
+        closeModal(); toast('Venda registrada ✓ Lucro ' + brl(lucroVenda(r))); render();
+      } catch (err) { b.disabled = false; toast(erroMsg(err), true); }
+    });
+  }
+
+  // ------------------------------------------------------------------ RELATÓRIOS
+  function barras(itens, fmtV) { // itens: [{t, v, sub}] — magnitude, uma cor só
+    var max = Math.max.apply(null, itens.map(function (i) { return Math.abs(i.v); }).concat([0]));
+    if (!itens.length) return '<div class="muted small">Sem dados no período.</div>';
+    return '<div class="stack" style="gap:10px">' + itens.map(function (i) {
+      var w = max ? Math.max(2, Math.round(Math.abs(i.v) / max * 100)) : 0;
+      return '<div title="' + esc(i.t + ': ' + fmtV(i.v) + (i.sub ? ' · ' + i.sub : '')) + '"><div class="row between small"><span>' + esc(i.t) + '</span><span style="font-weight:700">' + esc(fmtV(i.v)) + (i.sub ? ' <span class="muted" style="font-weight:500">· ' + esc(i.sub) + '</span>' : '') + '</span></div>' +
+        '<div class="bar" style="margin-top:5px"><i style="width:' + w + '%;background:' + (i.v < 0 ? 'var(--bad)' : 'var(--craft)') + '"></i></div></div>';
+    }).join('') + '</div>';
+  }
+  function telaRelatorios(v) {
+    setHeader('Relatórios');
+    var iv = intervalo('rel');
+    var vend = S.vendas.filter(function (x) { return noPeriodo(x.data, iv); });
+    var imps = S.impressoes.filter(function (x) { return noPeriodo(x.data, iv); });
+    var perd = S.perdas.filter(function (x) { return noPeriodo(x.data, iv); });
+    var soma = function (arr, fn) { return arr.reduce(function (a, x) { return a + fn(x); }, 0); };
+    var fat = soma(vend, function (x) { return num(x.valor_total) || 0; }), tax = soma(vend, function (x) { return num(x.taxa) || 0; });
+    var cus = soma(vend, function (x) { return (num(x.custo_unitario) || 0) * x.quantidade; });
+    var rPerda = soma(perd, custoPerda), luc = fat - tax - cus - rPerda;
+    var horasMaq = (soma(imps, function (x) { return num(x.tempo_min) || 0; }) + soma(perd, function (x) { return num(x.tempo_min) || 0; })) / 60;
+    // por canal
+    var porCanal = {}; vend.forEach(function (x) { var k = x.plataforma_id || '—'; porCanal[k] = porCanal[k] || { fat: 0, luc: 0, n: 0 }; porCanal[k].fat += num(x.valor_total) || 0; porCanal[k].luc += lucroVenda(x); porCanal[k].n++; });
+    var canalItens = Object.keys(porCanal).map(function (k) { return { t: nomePlat(k), v: porCanal[k].luc, sub: porCanal[k].n + ' venda(s), ' + brl(porCanal[k].fat) }; }).sort(function (a, b) { return b.v - a.v; });
+    // horas por impressora
+    var porImp = {}; imps.concat(perd).forEach(function (x) { if (!x.impressora_id) return; porImp[x.impressora_id] = (porImp[x.impressora_id] || 0) + (num(x.tempo_min) || 0); });
+    var impItens = impressoras().map(function (e) { return { t: e.nome, v: (porImp[e.id] || 0) / 60, sub: 'total ' + fmt(horasTotais(e), 0) + ' h' }; });
+    // produtos
+    var porProd = {}; vend.forEach(function (x) { var k = x.produto_id; if (!k) return; porProd[k] = porProd[k] || { q: 0, fat: 0, luc: 0 }; porProd[k].q += x.quantidade; porProd[k].fat += num(x.valor_total) || 0; porProd[k].luc += lucroVenda(x); });
+    var prodRows = Object.keys(porProd).map(function (k) { var p = byId(S.produtos, k); var hrs = p && p.tempo_min ? (p.tempo_min * porProd[k].q) / 60 : null; return { p: p, k: k, d: porProd[k], lh: hrs ? porProd[k].luc / hrs : null }; }).sort(function (a, b) { return b.d.luc - a.d.luc; });
+    // filamento por tipo
+    var porTipo = {}; imps.forEach(function (x) { var f = byId(S.filamentos, x.filamento_id); var k = f ? f.tipo : 'Não informado'; porTipo[k] = (porTipo[k] || 0) + (num(x.gramas) || 0); });
+    perd.forEach(function (x) { var f = byId(S.filamentos, x.filamento_id); var k = (f ? f.tipo : 'Não informado'); porTipo[k] = (porTipo[k] || 0) + (num(x.gramas) || 0); });
+    var tipoItens = Object.keys(porTipo).map(function (k) { return { t: k, v: porTipo[k] }; }).sort(function (a, b) { return b.v - a.v; });
+    v.innerHTML = '<div class="stack">' + periodoHtml('rel') +
+      '<div class="small muted">' + (iv.ini === '0000-01-01' ? 'Todo o histórico' : dataBR(iv.ini) + ' a ' + dataBR(iv.fim)) + '</div>' +
+      '<div class="grid g4">' + kpi('Faturamento', brl(fat), vend.length + ' venda(s) · ' + soma(vend, function (x) { return x.quantidade; }) + ' peça(s)') +
+      kpi('Custos + taxas', brl(cus + tax), 'custo ' + brl(cus) + ' · taxas ' + brl(tax)) +
+      kpi('Lucro', brl(luc), fat ? 'já descontando as perdas · ' + fmt(luc / fat * 100, 0) + '%' : 'já descontando as perdas') +
+      kpi('Perdas', brl(rPerda), fmt(soma(perd, function (x) { return num(x.gramas) || 0; }), 0) + ' g · ' + perd.length + ' registro(s)') + '</div>' +
+      '<div class="grid g2">' +
+      '<div class="card"><h2>Lucro por canal</h2>' + barras(canalItens, brl) + '</div>' +
+      '<div class="card"><h2>Horas por impressora</h2>' + barras(impItens, function (x) { return fmt(x, 1) + ' h'; }) + '<div class="hint" style="margin-top:10px">' + fmt(horasMaq, 1) + ' h de máquina no período (impressões + perdas).</div></div>' +
+      '</div>' +
+      '<div class="card"><h2>Produtos vendidos</h2>' + (prodRows.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Produto</th><th class="num">Peças</th><th class="num hide-m">Faturamento</th><th class="num">Lucro</th><th class="num hide-m">Lucro / hora de máquina</th></tr></thead><tbody>' +
+        prodRows.map(function (r) { return '<tr class="click" data-href="#/produto/' + r.k + '"><td style="font-weight:700">' + esc(r.p ? r.p.nome : '—') + '</td><td class="num">' + r.d.q + '</td><td class="num hide-m">' + brl(r.d.fat) + '</td><td class="num" style="font-weight:700;color:' + (r.d.luc < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + brl(r.d.luc) + '</td><td class="num hide-m">' + (r.lh !== null ? brl(r.lh) : '—') + '</td></tr>'; }).join('') +
+        '</tbody></table></div><div class="hint" style="margin-top:8px">“Lucro por hora de máquina” mostra o que mais vale a pena colocar para imprimir.</div>' : '<div class="muted small">Nenhuma venda no período.</div>') + '</div>' +
+      '<div class="card"><h2>Filamento consumido por tipo</h2>' + barras(tipoItens, function (x) { return fmt(x, 0) + ' g'; }) + '</div>' +
+      '</div>';
+    ligarDatasPeriodo(v);
+    v.onclick = function (e) { tratarPeriodo(e); };
   }
 
   // ------------------------------------------------------------------ EM BREVE

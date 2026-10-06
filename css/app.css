@@ -183,3 +183,11 @@ img.zoomable,.photo img,.foto-uni img{cursor:zoom-in}
 .busca{position:relative;display:flex;align-items:center;max-width:460px;width:100%}
 .busca svg{position:absolute;left:13px;color:var(--ink-faint);pointer-events:none}
 .busca .inp{padding-left:40px}
+
+/* ---------- vendas: filtro por canal ---------- */
+.canais{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;align-items:stretch}
+.canal{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;font-family:var(--body);background:#fff;border:1px solid var(--line);border-radius:14px;padding:12px 14px;cursor:pointer;color:var(--ink)}
+.canal .v{font-weight:800;font-size:17px}
+.canal:hover{border-color:var(--line-strong)}
+.canal.on{border:2px solid var(--craft);box-shadow:0 0 0 3px var(--craft-soft)}
+.canal.off{opacity:.55}
