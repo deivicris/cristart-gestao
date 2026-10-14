@@ -215,3 +215,15 @@ img.zoomable,.photo img,.foto-uni img{cursor:zoom-in}
   .custo-row>select,.custo-row>input[data-c-k="descricao"]{grid-column:1 / -1}
   .checklist{grid-template-columns:1fr 1fr}
 }
+
+/* ---------- Anúncios ---------- */
+.modal.lg{max-width:860px}
+.an-card{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--surface-2)}
+.an-card .field{margin-top:8px}
+.bad-t{color:var(--bad);font-weight:800}
+.an-dot{display:inline-block;width:12px;height:12px;border-radius:99px;border:2px solid var(--line-strong);background:#fff;vertical-align:-1px;margin-right:4px}
+.an-dot.txt{background:var(--craft-soft);border-color:var(--craft)}
+.an-dot.pub{background:var(--ok);border-color:var(--ok)}
+.an-mini{flex-wrap:wrap;gap:4px 10px;margin-top:6px;font-size:11.5px;color:var(--ink-soft)}
+.an-mini .an-dot{width:10px;height:10px}
+@media (max-width:760px){.an-mini.show-m{display:flex}}

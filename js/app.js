@@ -469,7 +469,7 @@
     { id: 'vendas', t: 'Vendas' },
     { id: 'producao', t: 'Produção e perdas' },
     { id: 'relatorios', t: 'Relatórios' },
-    { id: 'anuncios', t: 'Anúncios com IA', soon: 'etapa 3' },
+    { id: 'anuncios', t: 'Anúncios com IA' },
     { sep: true },
     { id: 'config', t: 'Configurações' }
   ];
@@ -527,7 +527,7 @@
         case 'pedidos': return telaPedidos(v);
         case 'pedido': return telaPedido(v, r.arg);
         case 'relatorios': return telaRelatorios(v);
-        case 'anuncios': return telaEmBreve(v, r.tela);
+        case 'anuncios': return telaAnuncios(v);
         default: go('#/painel');
       }
     } catch (e) {
@@ -777,7 +777,7 @@
       '<button type="button" class="icon-btn" id="est-mais" aria-label="Aumentar estoque">+</button>' +
       '<div class="small muted grow" id="est-info"></div></div></div>' +
       // anúncios
-      '<div class="card"><h2>Onde está anunciado</h2><div id="ads" class="ads"></div>' +
+      '<div class="card"><div class="row between wrap"><h2 style="margin:0">Onde está anunciado</h2>' + (novo ? '' : '<button type="button" class="btn btn-p btn-s" id="ads-ia">✨ Textos dos anúncios</button>') + '</div><div id="ads" class="ads" style="margin-top:8px"></div>' +
       '<div class="hint" style="margin-top:8px">O preço sugerido de cada plataforma cobre a taxa dela (configure as taxas em Configurações).</div></div>' +
       // salvar
       '<div class="sticky-save">' + (novo ? '' : '<button type="button" class="btn btn-d" id="del" style="margin-right:auto">Excluir</button>') +
@@ -866,12 +866,16 @@
       $('#ads').innerHTML = S.plataformas.filter(function (pl) { return pl.ativa; }).map(function (pl) {
         var a = ads[pl.id] || {}; var sug = precoPlataforma(preco, pl);
         return '<div class="ad-row" data-plat="' + pl.id + '">' +
-          '<label class="check ad-name"><input type="checkbox" data-ad="pub" data-pl="' + pl.id + '"' + (a.publicado ? ' checked' : '') + '> ' + esc(pl.nome) + '</label>' +
+          '<label class="check ad-name"><input type="checkbox" data-ad="pub" data-pl="' + pl.id + '"' + (a.publicado ? ' checked' : '') + '> ' + esc(pl.nome) + (a.titulo ? ' <span class="pill p-info" title="Texto do anúncio pronto">texto ✓</span>' : '') + '</label>' +
           '<input class="inp ad-url" data-ad="url" data-pl="' + pl.id + '" value="' + esc(a.url || '') + '" placeholder="cole o link do anúncio" aria-label="Link do anúncio em ' + esc(pl.nome) + '">' +
           '<div class="ad-price"><input class="inp" data-ad="preco" data-pl="' + pl.id + '" inputmode="decimal" value="' + esc(fmtIn(a.preco)) + '" placeholder="' + esc(sug ? fmtIn(sug.toFixed(2)) : 'preço lá') + '" style="text-align:right" aria-label="Preço em ' + esc(pl.nome) + '"><div class="hint">' + (sug ? 'sugerido ' + brl(sug) : '') + '</div></div>' +
           '<div class="ad-open">' + (isUrl(a.url) ? '<a class="btn btn-g btn-s" href="' + esc(a.url) + '" target="_blank" rel="noopener">Abrir ' + ICON.ext + '</a>' : '') + '</div></div>';
       }).join('');
     }
+    if ($('#ads-ia')) $('#ads-ia').addEventListener('click', function () {
+      if (dirty) return toast('Salve o produto antes de criar os anúncios', true);
+      abrirAnuncios(p.id, function () { render(); });
+    });
     $('#ads').addEventListener('input', function (e) {
       var el = e.target, pl = el.dataset.pl; if (!pl) return;
       ads[pl] = ads[pl] || { produto_id: p.id, plataforma_id: pl };
@@ -951,13 +955,13 @@
         // anúncios
         var adRows = Object.keys(ads).map(function (k) {
           var a = ads[k];
-          return { produto_id: p.id, plataforma_id: k, url: a.url || null, preco: num(a.preco), publicado: !!a.publicado, titulo: a.titulo || null, descricao: a.descricao || null, atualizado_em: new Date().toISOString() };
+          return { produto_id: p.id, plataforma_id: k, url: a.url || null, preco: num(a.preco), publicado: !!a.publicado, atualizado_em: new Date().toISOString() };
         });
         if (adRows.length) q(await sb.from('produto_anuncios').upsert(adRows));
         // atualiza cache
         S.produtos = S.produtos.filter(function (x) { return x.id !== saved.id; }).concat([saved]);
         S.prodInsumos = S.prodInsumos.filter(function (x) { return x.produto_id !== p.id; }).concat(lin);
-        S.anuncios = S.anuncios.filter(function (x) { return x.produto_id !== p.id; }).concat(adRows);
+        adRows.forEach(function (r) { var a0 = adDe(r.produto_id, r.plataforma_id); if (a0) Object.assign(a0, r); else S.anuncios.push(r); });
         dirty = false;
         toast('Produto salvo ✓');
         if (novo) go('#/produto/' + p.id); else { setHeader(saved.nome, '<a class="btn btn-g" href="#/produtos">Voltar</a>'); }
@@ -1578,6 +1582,7 @@
       '<div class="field"><label for="cats">Categorias</label><input class="inp" id="cats" value="' + esc(categorias().join(' | ')) + '"><div class="hint">Separe com |</div></div></div>' +
       '<div class="row" style="justify-content:flex-end"><button class="btn btn-p" type="submit">Salvar configurações</button></div></form></div>' +
 
+      cartaoIAConfig() +
       '<div class="card"><h2>Taxas por plataforma</h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Plataforma</th><th class="num">Taxa %</th><th class="num">Taxa fixa (R$)</th><th>Pode ter contato?</th><th>Ativa</th></tr></thead><tbody>' +
       S.plataformas.map(function (pl) {
         return '<tr data-pl="' + pl.id + '"><td style="font-weight:700">' + esc(pl.nome) + '</td>' +
@@ -1607,6 +1612,7 @@
       try { S.cfg = q(await sb.from('configuracoes').update(o).eq('id', 1).select().single()); toast('Configurações salvas ✓'); }
       catch (err) { toast(erroMsg(err), true); }
     });
+    ligarIAConfig();
     $('#save-pl').addEventListener('click', async function () {
       var rows = $$('tr[data-pl]').map(function (tr) {
         return { id: tr.dataset.pl, taxa_pct: num($('[data-f="taxa_pct"]', tr).value) || 0, taxa_fixa: num($('[data-f="taxa_fixa"]', tr).value) || 0, ativa: $('[data-f="ativa"]', tr).checked };
@@ -2683,6 +2689,216 @@
       toast('Pedido duplicado: #' + r.numero + ' ✓');
       go('#/pedido/' + r.id);
     } catch (err) { toast(erroMsg(err), true); }
+  }
+
+  // ================================================================== ANÚNCIOS COM IA (etapa 3)
+  var LIM_TITULO = { ml: 60, shopee: 100, tiktok: 100, olx: 70, facebook: 80, instagram: 60, site: 80 };
+  var LINK_ANUNCIAR = {
+    shopee: 'https://seller.shopee.com.br/portal/product/new', ml: 'https://www.mercadolivre.com.br/anunciar',
+    tiktok: 'https://seller-br.tiktok.com/', facebook: 'https://www.facebook.com/marketplace/create/item',
+    olx: 'https://www.olx.com.br/', instagram: 'https://www.instagram.com/'
+  };
+  var MOTORES = [
+    { v: 'gemini', t: 'Gemini (grátis)' }, { v: 'manual', t: 'Manual (modelo pronto, sem IA)' },
+    { v: 'haiku', t: 'Claude Haiku — em breve', off: true }, { v: 'sonnet', t: 'Claude Sonnet — em breve', off: true }, { v: 'gpt', t: 'ChatGPT — em breve', off: true }
+  ];
+  function falta08() { return !S.cfg || !('regras_anuncio' in S.cfg); }
+  function platsAnuncio() { return S.plataformas.filter(function (pl) { return pl.ativa; }); }
+  function adDe(pid, pl) { return S.anuncios.filter(function (a) { return a.produto_id === pid && a.plataforma_id === pl; })[0] || null; }
+  function precoNa(p, pl) { var a = adDe(p.id, pl.id); if (a && num(a.preco)) return num(a.preco); var v = precoPlataforma(num(p.preco), pl); return v || num(p.preco) || null; }
+  function dadosProdutoIA(p) {
+    var o = { nome: p.nome, categoria: p.categoria, descricao_breve: p.descricao_breve, descricao: p.descricao, material: p.tipo_produto === 'revenda' ? null : p.material, medidas: p.medidas, peso_g: num(p.peso_g), tipo: p.tipo_produto === 'revenda' ? 'produto de revenda (não impresso por nós)' : 'impresso em 3D por nós', pronta_entrega: p.estoque > 0 ? p.estoque + ' unidade(s) em estoque' : 'sob encomenda', preco_pix_site: num(p.preco) };
+    (p.opcoes || []).forEach(function (op) { if (op && op.name && op.choices && op.choices.length) o['opções de ' + op.name] = op.choices.join(', '); });
+    Object.keys(o).forEach(function (k) { if (o[k] === null || o[k] === undefined || o[k] === '') delete o[k]; });
+    return o;
+  }
+  function textoManual(p, pl) {
+    var cfg = S.cfg || {}, lim = LIM_TITULO[pl.id] || 80;
+    var t = p.nome + (p.material && p.tipo_produto !== 'revenda' ? ' ' + p.material + ' Impressão 3D' : '');
+    if (t.length > lim) t = p.nome.slice(0, lim);
+    var cores = (p.opcoes || []).filter(function (o) { return o && o.choices && o.choices.length; }).map(function (o) { return o.name + ': ' + o.choices.join(', '); });
+    var d = [p.descricao_breve || p.descricao || p.nome,
+      '', p.tipo_produto === 'revenda' ? '' : '✔ Feito em impressão 3D' + (p.material ? ' (' + p.material + ')' : ''),
+      p.medidas ? '✔ Medidas: ' + p.medidas : '', cores.length ? '✔ ' + cores.join(' · ') : '',
+      p.estoque > 0 ? '✔ Pronta entrega' : '✔ Produzido sob encomenda',
+      '', String(cfg.regras_anuncio || '').replace(/^Sempre incluir:\s*/i, '').replace(/"/g, '')].filter(function (x, i, a) { return x !== '' || (a[i - 1] !== ''); });
+    if (pl.permite_contato) d.push('', '📍 ' + (cfg.local_retirada || 'Curitiba') + ' · ' + (cfg.formas_entrega || 'entrega a combinar'), '📲 WhatsApp ' + (cfg.whatsapp || ''));
+    if (pl.permite_contato && num(p.preco)) d.splice(1, 0, '💰 ' + brl(precoNa(p, pl)));
+    return { titulo: t, descricao: d.join('\n').replace(/\n{3,}/g, '\n\n').trim(), palavras_chave: [p.nome, p.categoria, p.material, 'impressão 3D', 'Curitiba'].filter(Boolean).join(', ') };
+  }
+  async function erroFuncao(error) {
+    try { var j = await error.context.json(); if (j && j.erro) return j.erro; } catch (x) { }
+    var m = erroMsg(error);
+    if (/Failed to send|fetch|NetworkError|not found|404/i.test(m)) return 'A função "gerar-anuncio" ainda não está publicada no Supabase (veja o passo a passo em Configurações).';
+    return m;
+  }
+  async function chamarGemini(body) {
+    var r = await sb.functions.invoke('gerar-anuncio', { body: body });
+    if (r.error) throw new Error(await erroFuncao(r.error));
+    if (r.data && r.data.erro) throw new Error(r.data.erro);
+    return r.data;
+  }
+
+  // ------------------------------------------------------------------ janela de anúncios de um produto
+  function abrirAnuncios(pid, aoSalvar) {
+    var p = byId(S.produtos, pid); if (!p) return;
+    var plats = platsAnuncio();
+    var textos = {}; // plataforma -> {titulo, descricao, palavras_chave, gerado_por}
+    plats.forEach(function (pl) { var a = adDe(p.id, pl.id); if (a && (a.titulo || a.descricao)) textos[pl.id] = { titulo: a.titulo || '', descricao: a.descricao || '', palavras_chave: a.palavras_chave || '', gerado_por: a.gerado_por || null }; });
+    var marcadas = {}; plats.forEach(function (pl) { marcadas[pl.id] = pl.id !== 'site'; });
+    var mudou = false;
+    var m = modal('<div class="row between"><div class="row" style="gap:10px">' + thumbHtml(p.fotos && p.fotos[0], p.fotos) + '<div><h2 style="margin:0">Anúncios</h2><div class="small muted">' + esc(p.nome) + '</div></div></div><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
+      (falta08() ? '<div class="note">Para gerar e guardar os textos, rode o <b>script 08</b> no SQL Editor do Supabase e atualize a página.</div>' : '') +
+      '<div class="card" style="padding:12px;box-shadow:none"><div class="lbl" style="margin-bottom:6px">Plataformas</div><div class="row wrap" style="gap:6px" id="an-plats">' +
+      plats.map(function (pl) { return '<button type="button" class="chip' + (marcadas[pl.id] ? ' on' : '') + '" data-pl="' + pl.id + '">' + esc(pl.nome) + (textos[pl.id] ? ' ✓' : '') + '</button>'; }).join('') + '</div>' +
+      '<div class="grid g2" style="margin-top:10px"><div class="field"><label for="an-motor">Quem escreve</label><select class="inp" id="an-motor">' + MOTORES.map(function (x) { return '<option value="' + x.v + '"' + (x.off ? ' disabled' : '') + '>' + esc(x.t) + '</option>'; }).join('') + '</select></div>' +
+      '<div class="field"><label for="an-extra">Pedido extra (opcional)</label><input class="inp" id="an-extra" placeholder="ex.: destacar que é presente de Dia das Crianças"></div></div>' +
+      '<div class="row between wrap" style="margin-top:6px"><span class="small muted" id="an-info">' + ((p.fotos || []).length ? 'A IA olha até 3 fotos do produto.' : 'Sem fotos: a IA usa só os dados do produto.') + '</span><button type="button" class="btn btn-p" id="an-gerar">✨ Gerar textos</button></div></div>' +
+      '<div id="an-res" class="stack" style="gap:12px"></div>' +
+      '<div class="row between wrap"><button type="button" class="btn btn-g" id="an-fotos">Baixar fotos</button><div class="row" style="gap:8px"><button class="btn btn-g" data-x="close">Fechar</button><button class="btn btn-p" id="an-salvar">Salvar textos</button></div></div>', { size: 'lg', noFocus: true, sticky: true });
+
+    function draw() {
+      var ids = plats.filter(function (pl) { return textos[pl.id] || marcadas[pl.id]; });
+      $('#an-res', m).innerHTML = ids.filter(function (pl) { return textos[pl.id]; }).map(function (pl) {
+        var t = textos[pl.id], lim = LIM_TITULO[pl.id] || 80, preco = precoNa(p, pl), n = (t.titulo || '').length;
+        return '<div class="an-card" data-pl="' + pl.id + '"><div class="row between wrap"><div class="row" style="gap:8px"><b>' + esc(pl.nome) + '</b>' + (preco ? '<span class="pill p-info">' + brl(preco) + '</span>' : '') + (t.gerado_por ? '<span class="small muted">' + esc(t.gerado_por === 'manual' ? 'modelo pronto' : t.gerado_por) + '</span>' : '') + '</div>' +
+          '<div class="row" style="gap:6px"><button type="button" class="btn btn-g btn-s" data-cp="tudo">Copiar tudo</button>' + (LINK_ANUNCIAR[pl.id] ? '<a class="btn btn-g btn-s" href="' + LINK_ANUNCIAR[pl.id] + '" target="_blank" rel="noopener">Anunciar ' + ICON.ext + '</a>' : '') + '</div></div>' +
+          '<div class="field" style="margin-top:8px"><div class="row between"><label>Título</label><span class="small ' + (n > lim ? 'bad-t' : 'muted') + '" data-cont>' + n + '/' + lim + '</span></div><div class="row" style="gap:6px"><input class="inp" data-t="titulo" value="' + esc(t.titulo) + '"><button type="button" class="btn btn-g btn-s" data-cp="titulo">Copiar</button></div></div>' +
+          '<div class="field"><div class="row between"><label>Descrição</label><button type="button" class="btn btn-g btn-s" data-cp="descricao">Copiar</button></div><textarea class="inp" data-t="descricao" rows="8">' + esc(t.descricao) + '</textarea></div>' +
+          '<div class="field"><div class="row between"><label>' + (pl.id === 'instagram' ? 'Hashtags' : 'Palavras-chave') + '</label><button type="button" class="btn btn-g btn-s" data-cp="palavras_chave">Copiar</button></div><input class="inp" data-t="palavras_chave" value="' + esc(t.palavras_chave) + '"></div></div>';
+      }).join('') || '<div class="muted small" style="text-align:center;padding:10px 0">Escolha as plataformas e clique em <b>Gerar textos</b>.</div>';
+    }
+    function textoCopia(plId, k) {
+      var t = textos[plId];
+      var tags = function () { return plId === 'instagram' ? String(t.palavras_chave || '').split(',').map(function (s) { s = s.trim().replace(/^#/, '').replace(/\s+/g, ''); return s ? '#' + s : ''; }).filter(Boolean).join(' ') : t.palavras_chave; };
+      if (k === 'palavras_chave') return tags();
+      if (k === 'tudo') return plId === 'instagram' ? t.descricao + '\n\n' + tags() : t.titulo + '\n\n' + t.descricao;
+      return t[k] || '';
+    }
+    async function copiar(txt) {
+      try { await navigator.clipboard.writeText(txt); } catch (x) { var ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+      toast('Copiado ✓');
+    }
+    draw();
+    $('#an-plats', m).addEventListener('click', function (e) { var b = e.target.closest('[data-pl]'); if (!b) return; marcadas[b.dataset.pl] = !marcadas[b.dataset.pl]; b.classList.toggle('on', marcadas[b.dataset.pl]); });
+    $('#an-res', m).addEventListener('input', function (e) {
+      var c = e.target.closest('[data-pl]'), k = e.target.dataset.t; if (!c || !k) return;
+      textos[c.dataset.pl][k] = e.target.value; mudou = true;
+      if (k === 'titulo') { var lim = LIM_TITULO[c.dataset.pl] || 80, n = e.target.value.length, el = $('[data-cont]', c); el.textContent = n + '/' + lim; el.className = 'small ' + (n > lim ? 'bad-t' : 'muted'); }
+    });
+    $('#an-res', m).addEventListener('click', function (e) { var b = e.target.closest('[data-cp]'), c = e.target.closest('[data-pl]'); if (b && c) copiar(textoCopia(c.dataset.pl, b.dataset.cp)); });
+    $('#an-gerar', m).addEventListener('click', async function () {
+      var escolha = plats.filter(function (pl) { return marcadas[pl.id]; });
+      if (!escolha.length) return toast('Escolha ao menos uma plataforma', true);
+      var motor = $('#an-motor', m).value, btn = this;
+      if (motor === 'manual') {
+        escolha.forEach(function (pl) { var t = textoManual(p, pl); t.gerado_por = 'manual'; textos[pl.id] = t; });
+        mudou = true; draw(); return;
+      }
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Escrevendo…';
+      $('#an-info', m).textContent = 'O Gemini está olhando as fotos e escrevendo (uns 10 a 30 segundos)…';
+      try {
+        var cfg = S.cfg || {};
+        var d = await chamarGemini({
+          produto: dadosProdutoIA(p), fotos: (p.fotos || []).filter(isUrl).slice(0, 3),
+          plataformas: escolha.map(function (pl) { return { id: pl.id, nome: pl.nome, permite_contato: !!pl.permite_contato, limite_titulo: LIM_TITULO[pl.id] || 80, preco: precoNa(p, pl) }; }),
+          regras: cfg.regras_anuncio || '', contato: { whatsapp: cfg.whatsapp, retirada: cfg.local_retirada, entrega: cfg.formas_entrega, cidade: 'Curitiba-PR' },
+          instrucoes: $('#an-extra', m).value.trim() || null, modelo: cfg.ia_modelo || 'gemini-3.8-flash'
+        });
+        var n = 0;
+        (d.anuncios || []).forEach(function (a) {
+          var id = String(a.plataforma || '').toLowerCase(); if (!byId(escolha, id)) return;
+          textos[id] = { titulo: a.titulo || '', descricao: a.descricao || '', palavras_chave: (a.palavras_chave || []).join(', '), gerado_por: d.modelo || 'gemini' }; n++;
+        });
+        mudou = true; draw();
+        $('#an-info', m).textContent = n + ' anúncio(s) prontos · ' + (d.modelo || 'Gemini') + (d.fotos ? ' · olhou ' + d.fotos + ' foto(s)' : '') + '. Revise antes de publicar.';
+      } catch (err) { $('#an-info', m).textContent = ''; toast(err.message, true); }
+      btn.disabled = false; btn.textContent = '✨ Gerar de novo';
+    });
+    $('#an-fotos', m).addEventListener('click', async function () {
+      var fs = (p.fotos || []).filter(isUrl); if (!fs.length) return toast('Este produto não tem fotos', true);
+      for (var i = 0; i < fs.length; i++) {
+        try {
+          var bl = await (await fetch(fs[i])).blob(), a = document.createElement('a');
+          a.href = URL.createObjectURL(bl); a.download = norm(p.nome).replace(/[^a-z0-9]+/g, '-') + '-' + (i + 1) + '.' + ((bl.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg'));
+          document.body.appendChild(a); a.click(); a.remove();
+        } catch (x) { window.open(fs[i], '_blank', 'noopener'); }
+      }
+    });
+    $('#an-salvar', m).addEventListener('click', async function () {
+      if (falta08()) return toast('Rode o script 08 no Supabase primeiro', true);
+      var agora = new Date().toISOString();
+      var rows = Object.keys(textos).map(function (k) { var t = textos[k]; return { produto_id: p.id, plataforma_id: k, titulo: t.titulo || null, descricao: t.descricao || null, palavras_chave: t.palavras_chave || null, gerado_por: t.gerado_por || null, gerado_em: agora, atualizado_em: agora }; });
+      if (!rows.length) return toast('Nada para salvar ainda', true);
+      try {
+        var salvos = q(await sb.from('produto_anuncios').upsert(rows).select());
+        (salvos || rows).forEach(function (r) { var a = adDe(r.produto_id, r.plataforma_id); if (a) Object.assign(a, r); else S.anuncios.push(r); });
+        mudou = false; toast('Textos salvos ✓'); closeModal(); if (aoSalvar) aoSalvar();
+      } catch (err) { toast('Não salvou: ' + erroMsg(err), true); }
+    });
+    m.addEventListener('click', async function (e) {
+      var b = e.target.closest('[data-x="close"]'); if (!b) return;
+      if (mudou && !(await confirmar('Sair sem salvar?', 'Os textos gerados ou editados ainda não foram salvos.', 'Sair sem salvar', true))) return;
+      closeModal();
+    });
+  }
+
+  // ------------------------------------------------------------------ tela Anúncios
+  function telaAnuncios(v) {
+    setHeader('Anúncios com IA');
+    var plats = platsAnuncio().filter(function (pl) { return pl.id !== 'site'; });
+    var busca = S.ui.busca.anuncios || '', falta = S.ui.anFalta || '';
+    var lista = S.produtos.filter(function (p) { return p.ativo; }).filter(function (p) {
+      if (falta) { var a = adDe(p.id, falta); if (a && (a.publicado || a.url)) return false; }
+      return combina([p.nome, p.categoria, p.material], busca);
+    }).sort(function (a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); });
+    var est = function (p, pl) { var a = adDe(p.id, pl.id); if (a && (a.publicado || isUrl(a.url))) return 'pub'; if (a && a.titulo) return 'txt'; return ''; };
+    var nPub = 0, nTxt = 0;
+    S.produtos.filter(function (p) { return p.ativo; }).forEach(function (p) { plats.forEach(function (pl) { var e = est(p, pl); if (e === 'pub') nPub++; else if (e === 'txt') nTxt++; }); });
+    v.innerHTML = '<div class="stack">' +
+      (falta08() ? '<div class="card note">Para usar os anúncios com IA: rode o <b>script 08</b> no SQL Editor do Supabase e siga o passo a passo do Gemini em <a href="#/config">Configurações</a>.</div>' : '') +
+      '<div class="grid g3">' + kpi('Anúncios publicados', nPub, 'com link ou marcados como publicados') + kpi('Textos prontos', nTxt, 'gerados, ainda não publicados') + kpi('Produtos ativos', S.produtos.filter(function (p) { return p.ativo; }).length, plats.length + ' plataformas ativas') + '</div>' +
+      '<div class="row between wrap">' + buscaHtml('anuncios', 'Pesquisar produto…') +
+      '<div class="field" style="min-width:220px"><select class="inp" id="an-falta" aria-label="Filtrar"><option value="">Todos os produtos</option>' + plats.map(function (pl) { return '<option value="' + pl.id + '"' + (pl.id === falta ? ' selected' : '') + '>Ainda não publicados no ' + esc(pl.nome) + '</option>'; }).join('') + '</select></div></div>' +
+      '<div class="small muted row wrap" style="gap:12px"><span><i class="an-dot pub"></i> publicado</span><span><i class="an-dot txt"></i> texto pronto</span><span><i class="an-dot"></i> nada ainda</span></div>' +
+      (lista.length ? '<div class="card" style="padding:0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th style="width:58px"></th><th>Produto</th>' + plats.map(function (pl) { return '<th class="hide-m" style="text-align:center">' + esc(pl.nome) + '</th>'; }).join('') + '<th></th></tr></thead><tbody>' +
+        lista.map(function (p) {
+          return '<tr><td>' + thumbHtml(p.fotos && p.fotos[0], p.fotos) + '</td><td><div style="font-weight:700">' + esc(p.nome) + '</div><div class="small muted">' + esc([p.categoria, p.preco ? brl(num(p.preco)) : ''].filter(Boolean).join(' · ')) + '</div>' +
+            '<div class="show-m an-mini">' + plats.map(function (pl) { return '<span title="' + esc(pl.nome) + '"><i class="an-dot ' + est(p, pl) + '"></i>' + esc(pl.nome.split(' ')[0]) + '</span>'; }).join('') + '</div></td>' +
+            plats.map(function (pl) { return '<td class="hide-m" style="text-align:center"><i class="an-dot ' + est(p, pl) + '" title="' + esc(pl.nome) + '"></i></td>'; }).join('') +
+            '<td class="num"><button class="btn btn-p btn-s" data-an="' + p.id + '">✨ <span class="long">Anúncios</span></button></td></tr>';
+        }).join('') + '</tbody></table></div></div>' : (busca ? nadaAchado('anuncios') : '<div class="card empty">Nenhum produto aqui. 🎉</div>'));
+    ligarBusca('anuncios');
+    $('#an-falta').addEventListener('change', function (e) { S.ui.anFalta = e.target.value; render(); });
+    v.onclick = function (e) { var b = e.target.closest('[data-an]'); if (b) abrirAnuncios(b.dataset.an, function () { render(); }); };
+  }
+
+  // ------------------------------------------------------------------ configurações da IA
+  function cartaoIAConfig() {
+    var c = S.cfg || {};
+    if (falta08()) return '<div class="card"><h2>Anúncios com IA</h2><div class="note">Rode o <b>script 08</b> no SQL Editor do Supabase e atualize a página para configurar.</div></div>';
+    return '<div class="card"><h2>Anúncios com IA</h2><div class="stack">' +
+      '<div class="field"><label for="ia-regras">Regras que todo anúncio segue</label><textarea class="inp" id="ia-regras" rows="5">' + esc(c.regras_anuncio || '') + '</textarea><div class="hint">Uma por linha. A IA adapta ao estilo de cada plataforma (nos marketplaces ela não coloca WhatsApp, porque é proibido lá).</div></div>' +
+      '<div class="grid g2"><div class="field"><label for="ia-modelo">Modelo do Gemini</label><input class="inp" id="ia-modelo" value="' + esc(c.ia_modelo || 'gemini-3.8-flash') + '"><div class="hint">Se esse sair do ar, o sistema tenta sozinho o mais novo disponível.</div></div>' +
+      '<div class="row" style="align-items:flex-end;justify-content:flex-end;gap:8px"><button class="btn btn-g" id="ia-testar" type="button">Testar conexão</button><button class="btn btn-p" id="ia-salvar" type="button">Salvar</button></div></div>' +
+      '<details class="note"><summary style="cursor:pointer;font-weight:700">Como ligar o Gemini (uma vez só)</summary><ol style="margin:8px 0 0 18px;padding:0;line-height:1.7">' +
+      '<li>No Google AI Studio (aistudio.google.com), crie uma chave de API (“Get API key”).</li>' +
+      '<li>No Supabase: <b>Edge Functions › Secrets</b> › adicione <code>GEMINI_API_KEY</code> com a chave.</li>' +
+      '<li>No Supabase: <b>Edge Functions › Deploy a new function › Via Editor</b>, nome <code>gerar-anuncio</code>, cole o código do arquivo <code>index.ts</code> e clique em Deploy.</li>' +
+      '<li>Volte aqui e clique em <b>Testar conexão</b>.</li></ol></details></div></div>';
+  }
+  function ligarIAConfig() {
+    if (!$('#ia-salvar')) return;
+    $('#ia-salvar').addEventListener('click', async function () {
+      try { S.cfg = q(await sb.from('configuracoes').update({ regras_anuncio: $('#ia-regras').value.trim() || null, ia_modelo: $('#ia-modelo').value.trim() || 'gemini-3.8-flash', atualizado_em: new Date().toISOString() }).eq('id', 1).select().single()); toast('Regras dos anúncios salvas ✓'); }
+      catch (err) { toast(erroMsg(err), true); }
+    });
+    $('#ia-testar').addEventListener('click', async function () {
+      var b = this; b.disabled = true; b.innerHTML = '<span class="spinner"></span> Testando…';
+      try { await chamarGemini({ teste: true }); toast('Conexão com o Gemini funcionando ✓'); }
+      catch (err) { toast(err.message, true); }
+      b.disabled = false; b.textContent = 'Testar conexão';
+    });
   }
 
   // ------------------------------------------------------------------ EM BREVE
