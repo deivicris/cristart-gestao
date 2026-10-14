@@ -480,7 +480,7 @@
   }
   function go(h) { if (location.hash === h) render(); else location.hash = h; }
   function renderNav(tela) {
-    var base = tela === 'produto' ? 'produtos' : tela === 'pedido' ? 'pedidos' : tela === 'anuncio' ? 'anuncios' : tela;
+    var base = tela === 'produto' ? 'produtos' : tela === 'pedido' ? 'pedidos' : (tela === 'anuncio' || tela === 'shopee') ? 'anuncios' : tela;
     $('#nav').innerHTML = NAV.map(function (n) {
       if (n.sep) return '<div class="nav-sep"></div>';
       return '<a class="nav-btn' + (n.id === base ? ' on' : '') + '" href="#/' + n.id + '">' + esc(n.t) + (n.soon ? '<span class="soon">' + n.soon + '</span>' : '') + '</a>';
@@ -509,6 +509,7 @@
     var v = $('#view');
     v.onclick = null;
     v.onkeydown = null;
+    v.onchange = null;
     pasteAlvo.pagina = null;
     dirty = false;
     if (!S.ui.focoBusca) window.scrollTo(0, 0);
@@ -529,6 +530,7 @@
         case 'relatorios': return telaRelatorios(v);
         case 'anuncios': return telaAnuncios(v);
         case 'anuncio': return telaAnuncio(v, r.arg);
+        case 'shopee': return telaShopee(v);
         default: go('#/painel');
       }
     } catch (e) {
@@ -2960,7 +2962,7 @@
 
   // ------------------------------------------------------------------ tela Anúncios
   function telaAnuncios(v) {
-    setHeader('Anúncios com IA');
+    setHeader('Anúncios com IA', '<a class="btn btn-g" href="#/shopee">📦 <span class="long">Planilha da Shopee</span></a>');
     var plats = platsAnuncio().filter(function (pl) { return pl.id !== 'site'; });
     var busca = S.ui.busca.anuncios || '', falta = S.ui.anFalta || '';
     var lista = S.produtos.filter(function (p) { return p.ativo; }).filter(function (p) {
@@ -3014,6 +3016,146 @@
       try { await chamarGemini({ teste: true }); toast('Conexão com o Gemini funcionando ✓'); }
       catch (err) { toast(err.message, true); }
       b.disabled = false; b.textContent = 'Testar conexão';
+    });
+  }
+
+  // ------------------------------------------------------------------ planilha da Shopee (Adicionar em massa)
+  function carregarScript(src) {
+    return new Promise(function (ok, erro) {
+      if (document.querySelector('script[src="' + src + '"]')) return ok();
+      var s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = function () { erro(new Error('Não carregou ' + src)); };
+      document.head.appendChild(s);
+    });
+  }
+  function medidasCm(txt) {
+    var t = String(txt || '').toLowerCase().replace(/,/g, '.');
+    var ns = (t.match(/\d+(\.\d+)?/g) || []).map(Number).filter(function (n) { return n > 0; });
+    if (ns.length < 3) return null;
+    var k = /mm/.test(t) && !/cm/.test(t) ? 0.1 : 1;
+    return ns.slice(0, 3).map(function (n) { return Math.max(1, Math.ceil(n * k)); });
+  }
+  function linhaShopee(a, opc) {
+    var p = byId(S.produtos, a.produto_id) || {}, pl = byId(S.plataformas, 'shopee') || { id: 'shopee' };
+    var preco = num(a.preco) || precoPlataforma(num(p.preco), pl) || num(p.preco);
+    var pesoG = num(p.peso_g);
+    var fotos = (p.fotos || []).filter(isUrl).slice(0, 9);
+    var med = medidasCm(p.medidas);
+    var r = {
+      nome: (a.titulo || p.nome || '').trim(), descricao: (a.descricao || '').trim(), sku: 'CA-' + String(a.id).replace(/-/g, '').slice(0, 10).toUpperCase(),
+      preco: preco ? Math.round(preco * 100) / 100 : null, estoque: p.estoque > 0 ? p.estoque : opc.estoqueEnc,
+      peso: pesoG ? Math.ceil((pesoG + opc.embalagem) / 10) / 100 : null, med: med, fotos: fotos, prazo: p.estoque > 0 ? null : opc.prazo
+    };
+    var prob = [];
+    if (r.nome.length < 2) prob.push('sem título');
+    if (r.nome.length > 120) prob.push('título com mais de 120');
+    if (r.descricao.length < 10) prob.push('sem descrição');
+    if (r.descricao.length > 5000) prob.push('descrição com mais de 5000');
+    if (!r.preco || r.preco < 1) prob.push('sem preço');
+    if (!r.peso) prob.push('sem peso (cadastre no produto)');
+    if (!fotos.length) prob.push('sem foto');
+    r.problemas = prob;
+    return r;
+  }
+  function xmlEsc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, ''); }
+  function colLetra(n) { var s = ''; n++; while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+  async function gerarPlanilhaShopee(linhas, opc, modeloBuf) {
+    await carregarScript('js/vendor/jszip.min.js');
+    var buf = modeloBuf || await (await fetch('modelos/shopee_basico.xlsx?v=1')).arrayBuffer();
+    var zip = await JSZip.loadAsync(buf);
+    // acha a aba "Modelo"
+    var wb = await zip.file('xl/workbook.xml').async('string'), rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+    var m = wb.match(/<sheet [^>]*name="Modelo"[^>]*r:id="([^"]+)"/); if (!m) throw new Error('Esta planilha não tem a aba "Modelo". Baixe o modelo básico de novo na Shopee.');
+    var alvo = (rels.match(new RegExp('<Relationship [^>]*Id="' + m[1] + '"[^>]*Target="([^"]+)"')) || rels.match(new RegExp('<Relationship [^>]*Target="([^"]+)"[^>]*Id="' + m[1] + '"')) || [])[1];
+    var caminho = 'xl/' + String(alvo).replace(/^\/?xl\//, '');
+    var sh = await zip.file(caminho).async('string');
+    var ss = zip.file('xl/sharedStrings.xml') ? await zip.file('xl/sharedStrings.xml').async('string') : '';
+    var strs = (ss.match(/<si>[\s\S]*?<\/si>/g) || []).map(function (si) { return (si.match(/<t[^>]*>([\s\S]*?)<\/t>/g) || []).map(function (t) { return t.replace(/<[^>]+>/g, ''); }).join(''); });
+    // linha 1 = chaves das colunas (ps_product_name|1|0 …)
+    var l1 = (sh.match(/<row [^>]*r="1"[^>]*>([\s\S]*?)<\/row>/) || [])[1] || '';
+    var col = {};
+    (l1.match(/<c [^>]*>[\s\S]*?<\/c>/g) || []).forEach(function (c) {
+      var ref = c.match(/r="([A-Z]+)1"/), v = c.match(/<v>([\s\S]*?)<\/v>/), tipo = /t="s"/.test(c);
+      if (!ref || !v) return;
+      var k = tipo ? strs[+v[1]] : v[1]; col[String(k).split('|')[0]] = ref[1];
+    });
+    var precisa = ['ps_product_name', 'ps_product_description', 'ps_price', 'ps_weight'];
+    precisa.forEach(function (k) { if (!col[k]) throw new Error('O modelo da Shopee mudou (falta a coluna ' + k + '). Me mande o modelo novo.'); });
+    var corr = Object.keys(col).filter(function (k) { return /^channel_id/.test(k); })[0];
+    var linhasXml = linhas.map(function (r, i) {
+      var n = 7 + i, cs = [];
+      var txt = function (k, v) { if (col[k] && v !== null && v !== undefined && v !== '') cs.push([col[k], '<c r="' + col[k] + n + '" t="inlineStr"><is><t xml:space="preserve">' + xmlEsc(v) + '</t></is></c>']); };
+      var nm = function (k, v) { if (col[k] && v !== null && v !== undefined && v !== '') cs.push([col[k], '<c r="' + col[k] + n + '"><v>' + v + '</v></c>']); };
+      txt('ps_product_name', r.nome); txt('ps_product_description', r.descricao); txt('ps_sku_parent_short', r.sku);
+      nm('ps_price', r.preco.toFixed(2)); nm('ps_stock', r.estoque);
+      txt('ps_item_cover_image', r.fotos[0]);
+      r.fotos.slice(1, 9).forEach(function (f, j) { txt('ps_item_image_' + (j + 1), f); });
+      nm('ps_weight', r.peso.toFixed(2));
+      if (r.med) { nm('ps_length', r.med[0]); nm('ps_width', r.med[1]); nm('ps_height', r.med[2]); }
+      if (corr && opc.correios) txt(corr, 'Ligado');
+      if (r.prazo) nm('ps_product_pre_order_dts', r.prazo);
+      cs.sort(function (a, b) { return a[0].length - b[0].length || (a[0] < b[0] ? -1 : 1); });
+      return '<row r="' + n + '">' + cs.map(function (c) { return c[1]; }).join('') + '</row>';
+    }).join('');
+    sh = sh.replace(/<row [^>]*r="(\d+)"[^>]*\/>/g, function (x, rr) { return +rr >= 7 ? '' : x; })
+      .replace(/<row [^>]*r="(\d+)"[^>]*>[\s\S]*?<\/row>/g, function (x, rr) { return +rr >= 7 ? '' : x; })
+      .replace('</sheetData>', linhasXml + '</sheetData>')
+      .replace(/activePane="bottom_left"/g, 'activePane="bottomLeft"');
+    zip.file(caminho, sh);
+    return zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 }, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
+
+  function telaShopee(v) {
+    setHeader('Planilha da Shopee', '<a class="btn btn-g" href="#/anuncios">Voltar</a>');
+    if (falta08() || falta09()) { v.innerHTML = '<div class="card note">Rode os scripts <b>08</b> e <b>09</b> no Supabase primeiro.</div>'; return; }
+    var opc = S.ui.shopeeOpc || (S.ui.shopeeOpc = { estoqueEnc: 10, prazo: '', embalagem: 0, correios: true, soNovos: true });
+    var marc = S.ui.shopeeMarc || (S.ui.shopeeMarc = {});
+    var modeloBuf = S.ui.shopeeModelo || null;
+    var ads = S.anuncios.filter(function (a) { var p = byId(S.produtos, a.produto_id); return a.plataforma_id === 'shopee' && p && p.ativo && (!opc.soNovos || !(a.publicado || isUrl(a.url))); })
+      .sort(function (a, b) { return nomeProduto(a.produto_id).localeCompare(nomeProduto(b.produto_id), 'pt-BR'); });
+    var capas = {};
+    ads.forEach(function (a) { var p = byId(S.produtos, a.produto_id); var c = (p.fotos || [])[0]; if (c) capas[c] = (capas[c] || 0) + 1; });
+    var linhas = ads.map(function (a) {
+      var r = linhaShopee(a, { estoqueEnc: opc.estoqueEnc, prazo: num(opc.prazo), embalagem: num(opc.embalagem) || 0 }), p = byId(S.produtos, a.produto_id);
+      if (marc[a.id] === undefined) marc[a.id] = !r.problemas.length;
+      var aviso = (p.fotos || [])[0] && capas[p.fotos[0]] > 1 ? 'mesma foto de capa de outro anúncio (a Shopee não aceita capa repetida)' : '';
+      return { a: a, p: p, r: r, aviso: aviso };
+    });
+    var sel = linhas.filter(function (l) { return marc[l.a.id] && !l.r.problemas.length; });
+    v.innerHTML = '<div class="stack">' +
+      '<div class="card note">A planilha sai no <b>modelo oficial da Shopee</b> (Adicionar em massa › modelo básico). Depois de baixar: Seller Centre › Produtos › <b>Adicionar em massa</b> › <b>Fazer upload</b>. A Shopee sugere a categoria de cada produto; confira antes de publicar.</div>' +
+      '<div class="card"><h2>Opções</h2><div class="grid g4">' +
+      '<div class="field"><label for="sh-est">Estoque para os “sob encomenda”</label><input class="inp" id="sh-est" inputmode="numeric" value="' + esc(opc.estoqueEnc) + '"><div class="hint">Produtos com estoque no sistema usam o estoque real.</div></div>' +
+      '<div class="field"><label for="sh-prazo">Prazo de postagem p/ encomenda (dias)</label><input class="inp" id="sh-prazo" inputmode="numeric" value="' + esc(opc.prazo) + '" placeholder="vazio = envio normal"><div class="hint">Só para os sem estoque. Cada categoria aceita uma faixa (ex.: 3 a 15).</div></div>' +
+      '<div class="field"><label for="sh-emb">Somar peso da embalagem (g)</label><input class="inp" id="sh-emb" inputmode="numeric" value="' + esc(opc.embalagem) + '"><div class="hint">O frete é calculado pelo peso.</div></div>' +
+      '<div class="stack" style="gap:2px;justify-content:flex-end"><label class="check"><input type="checkbox" id="sh-corr"' + (opc.correios ? ' checked' : '') + '> Ativar Correios</label><label class="check"><input type="checkbox" id="sh-novos"' + (opc.soNovos ? ' checked' : '') + '> Só os ainda não publicados</label></div></div>' +
+      '<div class="row between wrap" style="margin-top:8px"><span class="small muted">' + (modeloBuf ? 'Usando o modelo que você enviou agora.' : 'Usando o modelo básico baixado em 15/10/2026.') + '</span><label class="btn btn-g btn-s" for="sh-modelo">Usar outro modelo da Shopee</label><input type="file" id="sh-modelo" accept=".xlsx" class="hidden"></div></div>' +
+      (linhas.length ? '<div class="card" style="padding:0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th style="width:40px"><input type="checkbox" id="sh-todos" aria-label="Marcar todos"' + (sel.length && sel.length === linhas.filter(function (l) { return !l.r.problemas.length; }).length ? ' checked' : '') + '></th><th>Anúncio</th><th class="num">Preço</th><th class="num hide-m">Estoque</th><th class="num hide-m">Peso</th><th class="num hide-m">Fotos</th><th>Situação</th></tr></thead><tbody>' +
+        linhas.map(function (l) {
+          var ok = !l.r.problemas.length;
+          return '<tr><td><input type="checkbox" data-sh="' + l.a.id + '"' + (marc[l.a.id] && ok ? ' checked' : '') + (ok ? '' : ' disabled') + ' aria-label="Incluir"></td>' +
+            '<td><div style="font-weight:700">' + esc(l.r.nome || l.p.nome) + '</div><div class="small muted">' + esc(l.p.nome + (l.a.apelido ? ' · ' + l.a.apelido : '')) + '</div></td>' +
+            '<td class="num">' + (l.r.preco ? brl(l.r.preco) : '—') + '</td><td class="num hide-m">' + l.r.estoque + '</td><td class="num hide-m">' + (l.r.peso ? fmt(l.r.peso * 1000, 0) + ' g' : '—') + '</td><td class="num hide-m">' + l.r.fotos.length + '</td>' +
+            '<td>' + (ok ? '<span class="pill p-ok">pronto</span>' : l.r.problemas.map(function (x) { return '<span class="pill p-warn">' + esc(x) + '</span>'; }).join(' ')) + (l.aviso ? ' <span class="pill p-info" title="' + esc(l.aviso) + '">capa repetida</span>' : '') +
+            (ok ? '' : ' <a class="small" href="#/' + (/peso|foto/.test(l.r.problemas.join()) ? 'produto/' : 'anuncio/') + l.p.id + '">corrigir</a>') + '</td></tr>';
+        }).join('') + '</tbody></table></div></div>' : '<div class="card empty">Nenhum anúncio da Shopee ' + (opc.soNovos ? 'por publicar' : '') + '. Crie os textos na página de anúncios de cada produto.</div>') +
+      '<div class="sticky-save"><span class="small muted" style="margin-right:auto;align-self:center">' + sel.length + ' anúncio(s) na planilha</span><button class="btn btn-p" id="sh-baixar"' + (sel.length ? '' : ' disabled') + '>Baixar planilha da Shopee</button></div></div>';
+    var ler = function () { opc.estoqueEnc = Math.max(1, Math.round(num($('#sh-est').value) || 10)); opc.prazo = $('#sh-prazo').value.trim(); opc.embalagem = Math.max(0, num($('#sh-emb').value) || 0); opc.correios = $('#sh-corr').checked; opc.soNovos = $('#sh-novos').checked; };
+    ['#sh-est', '#sh-prazo', '#sh-emb'].forEach(function (s) { $(s).addEventListener('change', function () { ler(); render(); }); });
+    ['#sh-corr', '#sh-novos'].forEach(function (s) { $(s).addEventListener('change', function () { ler(); render(); }); });
+    $('#sh-modelo').addEventListener('change', async function (e) { var f = e.target.files[0]; if (!f) return; S.ui.shopeeModelo = await f.arrayBuffer(); toast('Modelo carregado ✓'); render(); });
+    if ($('#sh-todos')) $('#sh-todos').addEventListener('change', function (e) { linhas.forEach(function (l) { if (!l.r.problemas.length) marc[l.a.id] = e.target.checked; }); render(); });
+    v.onchange = function (e) { var c = e.target.closest('[data-sh]'); if (c) { marc[c.dataset.sh] = c.checked; render(); } };
+    $('#sh-baixar').addEventListener('click', async function () {
+      var b = this; b.disabled = true; b.innerHTML = '<span class="spinner"></span> Montando…';
+      try {
+        var prazo = num(opc.prazo);
+        var rs = sel.map(function (l) { return linhaShopee(l.a, { estoqueEnc: opc.estoqueEnc, prazo: prazo, embalagem: num(opc.embalagem) || 0 }); });
+        var blob = await gerarPlanilhaShopee(rs, opc, S.ui.shopeeModelo);
+        var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'shopee-cristart-' + hojeISO() + '.xlsx';
+        document.body.appendChild(a); a.click(); a.remove();
+        toast('Planilha baixada ✓ — agora suba no Seller Centre');
+      } catch (err) { toast(err.message || erroMsg(err), true); }
+      b.disabled = false; b.textContent = 'Baixar planilha da Shopee';
     });
   }
 
