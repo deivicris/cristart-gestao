@@ -480,7 +480,7 @@
   }
   function go(h) { if (location.hash === h) render(); else location.hash = h; }
   function renderNav(tela) {
-    var base = tela === 'produto' ? 'produtos' : tela === 'pedido' ? 'pedidos' : tela;
+    var base = tela === 'produto' ? 'produtos' : tela === 'pedido' ? 'pedidos' : tela === 'anuncio' ? 'anuncios' : tela;
     $('#nav').innerHTML = NAV.map(function (n) {
       if (n.sep) return '<div class="nav-sep"></div>';
       return '<a class="nav-btn' + (n.id === base ? ' on' : '') + '" href="#/' + n.id + '">' + esc(n.t) + (n.soon ? '<span class="soon">' + n.soon + '</span>' : '') + '</a>';
@@ -528,6 +528,7 @@
         case 'pedido': return telaPedido(v, r.arg);
         case 'relatorios': return telaRelatorios(v);
         case 'anuncios': return telaAnuncios(v);
+        case 'anuncio': return telaAnuncio(v, r.arg);
         default: go('#/painel');
       }
     } catch (e) {
@@ -697,8 +698,6 @@
       usa_hora_maquina: true, estoque: 0, fotos: [], opcoes: [], videos: [], material: 'PLA', acabamento_faixa: (cfg.faixas_acabamento || [])[0] || null
     };
     var itens = S.prodInsumos.filter(function (x) { return x.produto_id === p.id; }).map(function (x) { return { insumo_id: x.insumo_id, quantidade: x.quantidade }; });
-    var ads = {};
-    S.anuncios.filter(function (a) { return a.produto_id === p.id; }).forEach(function (a) { ads[a.plataforma_id] = JSON.parse(JSON.stringify(a)); });
 
     setHeader(novo ? 'Novo produto' : p.nome, (novo ? '' : '<button class="btn btn-g hide-m" id="pq-imp">+ Impressão</button><button class="btn btn-g hide-m" id="pq-venda">+ Venda</button>') + '<a class="btn btn-g" href="#/produtos">Voltar</a>');
     if (!novo) {
@@ -777,7 +776,7 @@
       '<button type="button" class="icon-btn" id="est-mais" aria-label="Aumentar estoque">+</button>' +
       '<div class="small muted grow" id="est-info"></div></div></div>' +
       // anúncios
-      '<div class="card"><div class="row between wrap"><h2 style="margin:0">Onde está anunciado</h2>' + (novo ? '' : '<button type="button" class="btn btn-p btn-s" id="ads-ia">✨ Textos dos anúncios</button>') + '</div><div id="ads" class="ads" style="margin-top:8px"></div>' +
+      '<div class="card"><div class="row between wrap"><h2 style="margin:0">Onde está anunciado</h2>' + (novo ? '' : '<div class="row" style="gap:6px"><button type="button" class="btn btn-g btn-s" id="dup-prod">Duplicar produto</button><button type="button" class="btn btn-p btn-s" id="ads-ia">✨ Anúncios</button></div>') + '</div><div id="ads" class="ads" style="margin-top:8px"></div>' +
       '<div class="hint" style="margin-top:8px">O preço sugerido de cada plataforma cobre a taxa dela (configure as taxas em Configurações).</div></div>' +
       // salvar
       '<div class="sticky-save">' + (novo ? '' : '<button type="button" class="btn btn-d" id="del" style="margin-right:auto">Excluir</button>') +
@@ -861,34 +860,24 @@
       itens.splice(+b.dataset.i, 1); dirty = true; drawIns(); recalc();
     });
 
-    // anúncios
+    // anúncios (resumo; a edição fica na página de anúncios)
     function drawAds(preco) {
-      $('#ads').innerHTML = S.plataformas.filter(function (pl) { return pl.ativa; }).map(function (pl) {
-        var a = ads[pl.id] || {}; var sug = precoPlataforma(preco, pl);
-        return '<div class="ad-row" data-plat="' + pl.id + '">' +
-          '<label class="check ad-name"><input type="checkbox" data-ad="pub" data-pl="' + pl.id + '"' + (a.publicado ? ' checked' : '') + '> ' + esc(pl.nome) + (a.titulo ? ' <span class="pill p-info" title="Texto do anúncio pronto">texto ✓</span>' : '') + '</label>' +
-          '<input class="inp ad-url" data-ad="url" data-pl="' + pl.id + '" value="' + esc(a.url || '') + '" placeholder="cole o link do anúncio" aria-label="Link do anúncio em ' + esc(pl.nome) + '">' +
-          '<div class="ad-price"><input class="inp" data-ad="preco" data-pl="' + pl.id + '" inputmode="decimal" value="' + esc(fmtIn(a.preco)) + '" placeholder="' + esc(sug ? fmtIn(sug.toFixed(2)) : 'preço lá') + '" style="text-align:right" aria-label="Preço em ' + esc(pl.nome) + '"><div class="hint">' + (sug ? 'sugerido ' + brl(sug) : '') + '</div></div>' +
-          '<div class="ad-open">' + (isUrl(a.url) ? '<a class="btn btn-g btn-s" href="' + esc(a.url) + '" target="_blank" rel="noopener">Abrir ' + ICON.ext + '</a>' : '') + '</div></div>';
-      }).join('');
+      var l = adsDe(p.id);
+      $('#ads').innerHTML = novo ? '<div class="small muted">Salve o produto para criar os anúncios.</div>' : (l.length ? l.map(function (a) {
+        var pl = byId(S.plataformas, a.plataforma_id) || { nome: a.plataforma_id }, pr = num(a.preco) || precoPlataforma(preco, pl);
+        return '<div class="ad-row"><div class="ad-name" style="font-weight:700">' + esc(pl.nome) + (a.apelido ? ' <span class="small muted">· ' + esc(a.apelido) + '</span>' : '') + '</div>' +
+          '<div class="small" style="align-self:center">' + (a.titulo ? esc(a.titulo) : '<span class="muted">sem texto</span>') + '</div>' +
+          '<div class="num" style="align-self:center">' + (pr ? brl(pr) : '—') + '</div>' +
+          '<div class="ad-open">' + (isUrl(a.url) ? '<a class="btn btn-g btn-s" href="' + esc(a.url) + '" target="_blank" rel="noopener">Abrir ' + ICON.ext + '</a>' : (a.publicado ? '<span class="pill p-ok">publicado</span>' : (a.titulo ? '<span class="pill p-info">texto ✓</span>' : ''))) + '</div></div>';
+      }).join('') : '<div class="small muted">Nenhum anúncio ainda. Clique em <b>✨ Anúncios</b> para criar com IA.</div>');
     }
     if ($('#ads-ia')) $('#ads-ia').addEventListener('click', function () {
-      if (dirty) return toast('Salve o produto antes de criar os anúncios', true);
-      abrirAnuncios(p.id, function () { render(); });
+      if (dirty) return toast('Salve o produto antes de abrir os anúncios', true);
+      go('#/anuncio/' + p.id);
     });
-    $('#ads').addEventListener('input', function (e) {
-      var el = e.target, pl = el.dataset.pl; if (!pl) return;
-      ads[pl] = ads[pl] || { produto_id: p.id, plataforma_id: pl };
-      if (el.dataset.ad === 'url') ads[pl].url = el.value.trim() || null;
-      if (el.dataset.ad === 'preco') ads[pl].preco = num(el.value);
-      dirty = true;
-    });
-    $('#ads').addEventListener('change', function (e) {
-      var el = e.target, pl = el.dataset.pl; if (!pl) return;
-      ads[pl] = ads[pl] || { produto_id: p.id, plataforma_id: pl };
-      if (el.dataset.ad === 'pub') ads[pl].publicado = el.checked;
-      if (el.dataset.ad === 'url') { drawAds(num($('[data-k="preco"]').value)); }
-      dirty = true;
+    if ($('#dup-prod')) $('#dup-prod').addEventListener('click', function () {
+      if (dirty) return toast('Salve o produto antes de duplicar', true);
+      duplicarProduto(p.id);
     });
 
     // recálculo ao vivo
@@ -952,16 +941,9 @@
           .reduce(function (acc, it) { if (!acc.some(function (a) { return a.insumo_id === it.insumo_id; })) acc.push(it); return acc; }, [])
           .map(function (it) { return { produto_id: p.id, insumo_id: it.insumo_id, quantidade: num(it.quantidade) }; });
         if (lin.length) q(await sb.from('produto_insumos').insert(lin));
-        // anúncios
-        var adRows = Object.keys(ads).map(function (k) {
-          var a = ads[k];
-          return { produto_id: p.id, plataforma_id: k, url: a.url || null, preco: num(a.preco), publicado: !!a.publicado, atualizado_em: new Date().toISOString() };
-        });
-        if (adRows.length) q(await sb.from('produto_anuncios').upsert(adRows));
         // atualiza cache
         S.produtos = S.produtos.filter(function (x) { return x.id !== saved.id; }).concat([saved]);
         S.prodInsumos = S.prodInsumos.filter(function (x) { return x.produto_id !== p.id; }).concat(lin);
-        adRows.forEach(function (r) { var a0 = adDe(r.produto_id, r.plataforma_id); if (a0) Object.assign(a0, r); else S.anuncios.push(r); });
         dirty = false;
         toast('Produto salvo ✓');
         if (novo) go('#/produto/' + p.id); else { setHeader(saved.nome, '<a class="btn btn-g" href="#/produtos">Voltar</a>'); }
@@ -1692,7 +1674,7 @@
         var links = sp.links || {};
         var mapa = { shopee: 'shopee', mercadolivre: 'ml', ml: 'ml', olx: 'olx', facebook: 'facebook', tiktok: 'tiktok' };
         var adRows = Object.keys(links).filter(function (k) { return mapa[k] && isUrl(links[k]); }).map(function (k) { return { produto_id: id, plataforma_id: mapa[k], url: links[k], publicado: true }; });
-        if (adRows.length) { q(await sb.from('produto_anuncios').upsert(adRows)); S.anuncios = S.anuncios.concat(adRows); }
+        if (adRows.length) { var adsIns = q(await sb.from('produto_anuncios').insert(adRows).select()); S.anuncios = S.anuncios.concat(adsIns || adRows); }
         feitos++;
         L('   ok (' + fotos.length + ' foto' + (fotos.length === 1 ? '' : 's') + (revenda ? ', marcado como revenda' : '') + ')');
       }
@@ -2707,27 +2689,72 @@
   function adDe(pid, pl) { return S.anuncios.filter(function (a) { return a.produto_id === pid && a.plataforma_id === pl; })[0] || null; }
   function precoNa(p, pl) { var a = adDe(p.id, pl.id); if (a && num(a.preco)) return num(a.preco); var v = precoPlataforma(num(p.preco), pl); return v || num(p.preco) || null; }
   function dadosProdutoIA(p) {
-    var o = { nome: p.nome, categoria: p.categoria, descricao_breve: p.descricao_breve, descricao: p.descricao, material: p.tipo_produto === 'revenda' ? null : p.material, medidas: p.medidas, peso_g: num(p.peso_g), tipo: p.tipo_produto === 'revenda' ? 'produto de revenda (não impresso por nós)' : 'impresso em 3D por nós', pronta_entrega: p.estoque > 0 ? p.estoque + ' unidade(s) em estoque' : 'sob encomenda', preco_pix_site: num(p.preco) };
+    var o = { nome: p.nome, categoria: p.categoria, descricao_breve: p.descricao_breve, descricao: p.descricao, medidas: p.medidas, peso_g: num(p.peso_g), tipo: p.tipo_produto === 'revenda' ? 'produto de revenda' : 'produzido em impressão 3D', pronta_entrega: p.estoque > 0 ? p.estoque + ' unidade(s) em estoque' : 'sob encomenda', preco_pix_site: num(p.preco) };
     (p.opcoes || []).forEach(function (op) { if (op && op.name && op.choices && op.choices.length) o['opções de ' + op.name] = op.choices.join(', '); });
     Object.keys(o).forEach(function (k) { if (o[k] === null || o[k] === undefined || o[k] === '') delete o[k]; });
     return o;
   }
+  var ESTILO_PLAT = {
+    shopee: 'Shopee: siga o ANÚNCIO MODELO bem de perto (mesma estrutura, blocos e emojis). Título forte para a busca, palavra principal no começo, sem emojis e sem CAIXA ALTA inteira. Contato só pelo chat da Shopee.',
+    ml: 'Mercado Livre: mesma estrutura de blocos do ANÚNCIO MODELO, mas título técnico e direto (produto + característica + medida/quantidade), SEM emojis no título, sem "promoção" ou "frete grátis". Na descrição use texto simples, títulos dos blocos em MAIÚSCULAS e tópicos com hífen (no lugar dos emojis). Contato só pelas perguntas do Mercado Livre.',
+    tiktok: 'TikTok Shop: estrutura do ANÚNCIO MODELO em versão mais curta e animada, palavra principal no começo do título. Contato só pelo chat do TikTok.',
+    facebook: 'Facebook Marketplace: mesmos blocos do ANÚNCIO MODELO, tom conversado e próximo. Troque o bloco de envio por retirada e entrega em Curitiba (dados de CONTATO) e termine chamando no WhatsApp. Pode citar o preço.',
+    olx: 'OLX: título objetivo (o que é + destaque). Mesmos blocos do ANÚNCIO MODELO de forma enxuta; troque o bloco de envio por retirada e entrega em Curitiba e WhatsApp (dados de CONTATO). Pode citar o preço.',
+    instagram: 'Instagram: legenda de post/reels. Primeira linha que prende a atenção, 2 a 4 tópicos curtos com emojis tirados dos DESTAQUES, chamada para chamar no direct ou WhatsApp, e de 8 a 15 hashtags em português no campo palavras_chave (sem #). O título é só uma frase curta de capa.',
+    site: 'Site / WhatsApp: mesmos blocos do ANÚNCIO MODELO, tom amigável; troque o envio por retirada/entrega em Curitiba e WhatsApp.'
+  };
+  function montarPrompt(p, plats, extra) {
+    var cfg = S.cfg || {};
+    return [
+      'Você é redator de anúncios de e-commerce brasileiro da CristART 3D, de Curitiba-PR, que vende peças produzidas em impressão 3D (decoração, utilidades, cozinha, gamer, brinquedos, chaveiros).',
+      'Escreva em português do Brasil, natural e vendedor, sem exageros.',
+      '',
+      'PROIBIDO (vale para todas as plataformas):',
+      '- Inventar características que não estejam nos dados ou nas fotos. Se não souber medida, quantidade ou peso, não invente números.',
+      '- Citar o nome do material ou do filamento (PLA, PETG, ABS, resina etc.). No máximo diga "material resistente" ou "plástico resistente".',
+      '- Dizer que é empresa ou negócio familiar, ou que o acabamento é feito à mão / artesanal.',
+      '- Oferecer personalização de cores, nomes ou modelos, a menos que o PEDIDO EXTRA peça isso.',
+      '- Dizer que é seguro para alimentos ou atóxico, a menos que os dados do produto digam.',
+      '- Nas plataformas marcadas "SEM contato externo": telefone, WhatsApp, Instagram, links ou pedir contato fora da plataforma.',
+      '',
+      'ANÚNCIO MODELO (feito pela equipe; copie a ESTRUTURA, o tom e o tipo de bloco, adapte o conteúdo ao produto e pule blocos que não fazem sentido, como "COMO USAR" num enfeite):',
+      '<<<', String(cfg.modelo_anuncio || '').trim() || '(sem modelo)', '>>>',
+      '',
+      'REGRAS DA LOJA (inclua em todos os anúncios, adaptando ao estilo de cada plataforma):',
+      String(cfg.regras_anuncio || '').trim() || '(nenhuma)',
+      '',
+      'PRODUTO:', JSON.stringify(dadosProdutoIA(p), null, 2),
+      '',
+      'CONTATO (só para plataformas que permitem contato): ' + JSON.stringify({ whatsapp: cfg.whatsapp, retirada: cfg.local_retirada, entrega: cfg.formas_entrega, cidade: 'Curitiba-PR' }),
+      extra ? '\nPEDIDO EXTRA PARA ESTA VEZ: ' + extra : '',
+      '',
+      'PLATAFORMAS (um anúncio para cada; respeite o limite de caracteres do título):',
+      plats.map(function (pl) {
+        var pr = precoNa(p, pl);
+        return '- id "' + pl.id + '" (' + pl.nome + ') · título com no máximo ' + (LIM_TITULO[pl.id] || 80) + ' caracteres · ' + (pl.permite_contato ? 'pode ter contato' : 'SEM contato externo') + (pr ? ' · preço aqui: R$ ' + pr.toFixed(2).replace('.', ',') : '') + '\n  ' + (ESTILO_PLAT[pl.id] || 'Estilo de marketplace brasileiro, seguindo o ANÚNCIO MODELO.');
+      }).join('\n'),
+      '',
+      'Em palavras_chave, coloque de 6 a 15 termos que o cliente digitaria na busca (Instagram: hashtags sem #). Não coloque preço na descrição de Shopee, Mercado Livre e TikTok.',
+      'Responda no formato JSON: {"anuncios":[{"plataforma":"<id>","titulo":"…","descricao":"…","palavras_chave":["…"]}]}.'
+    ].join('\n');
+  }
   function textoManual(p, pl) {
     var cfg = S.cfg || {}, lim = LIM_TITULO[pl.id] || 80;
-    var t = p.nome + (p.material && p.tipo_produto !== 'revenda' ? ' ' + p.material + ' Impressão 3D' : '');
+    var t = p.nome;
     if (t.length > lim) t = p.nome.slice(0, lim);
     var cores = (p.opcoes || []).filter(function (o) { return o && o.choices && o.choices.length; }).map(function (o) { return o.name + ': ' + o.choices.join(', '); });
     var d = [p.descricao_breve || p.descricao || p.nome,
-      '', p.tipo_produto === 'revenda' ? '' : '✔ Feito em impressão 3D' + (p.material ? ' (' + p.material + ')' : ''),
+      '', '✨ DESTAQUES DO PRODUTO:',
       p.medidas ? '✔ Medidas: ' + p.medidas : '', cores.length ? '✔ ' + cores.join(' · ') : '',
-      p.estoque > 0 ? '✔ Pronta entrega' : '✔ Produzido sob encomenda',
-      '', String(cfg.regras_anuncio || '').replace(/^Sempre incluir:\s*/i, '').replace(/"/g, '')].filter(function (x, i, a) { return x !== '' || (a[i - 1] !== ''); });
+      p.estoque > 0 ? '✔ Pronta entrega' : '',
+      '', '📌 ATENÇÃO:', p.tipo_produto === 'revenda' ? '' : '- Produto produzido em impressão 3D, portanto pode apresentar pequenos detalhes decorrentes da impressão.', '- A tonalidade da cor pode variar de acordo com a iluminação e as configurações do seu dispositivo.',
+      '', String(cfg.regras_anuncio || '').split('\n').filter(function (l) { return /quantidade/i.test(l); }).join('\n').replace(/^Sempre incluir:\s*/i, '').replace(/"/g, '')].filter(function (x, i, a) { return x !== '' || (a[i - 1] !== ''); });
     if (pl.permite_contato) d.push('', '📍 ' + (cfg.local_retirada || 'Curitiba') + ' · ' + (cfg.formas_entrega || 'entrega a combinar'), '📲 WhatsApp ' + (cfg.whatsapp || ''));
     if (pl.permite_contato && num(p.preco)) d.splice(1, 0, '💰 ' + brl(precoNa(p, pl)));
-    return { titulo: t, descricao: d.join('\n').replace(/\n{3,}/g, '\n\n').trim(), palavras_chave: [p.nome, p.categoria, p.material, 'impressão 3D', 'Curitiba'].filter(Boolean).join(', ') };
+    return { titulo: t, descricao: d.join('\n').replace(/\n{3,}/g, '\n\n').trim(), palavras_chave: [p.nome, p.categoria, 'impressão 3D'].filter(Boolean).join(', ') };
   }
   async function erroFuncao(error) {
-    try { var j = await error.context.json(); if (j && j.erro) return j.erro; } catch (x) { }
+    try { var j = await error.context.json(); if (j && j.erro) return /ao menos uma plataforma/.test(j.erro) ? 'A função do Supabase está na versão antiga. Publique de novo o código novo da função gerar-anuncio (mesmo passo 4).' : j.erro; } catch (x) { }
     var m = erroMsg(error);
     if (/Failed to send|fetch|NetworkError|not found|404/i.test(m)) return 'A função "gerar-anuncio" ainda não está publicada no Supabase (veja o passo a passo em Configurações).';
     return m;
@@ -2736,86 +2763,176 @@
     var r = await sb.functions.invoke('gerar-anuncio', { body: body });
     if (r.error) throw new Error(await erroFuncao(r.error));
     if (r.data && r.data.erro) throw new Error(r.data.erro);
+    if (r.data && r.data.anuncios && !r.data.versao) throw new Error('A função do Supabase está na versão antiga. Publique de novo o código novo da função gerar-anuncio (mesmo passo 4).');
     return r.data;
   }
 
-  // ------------------------------------------------------------------ janela de anúncios de um produto
-  function abrirAnuncios(pid, aoSalvar) {
-    var p = byId(S.produtos, pid); if (!p) return;
-    var plats = platsAnuncio();
-    var textos = {}; // plataforma -> {titulo, descricao, palavras_chave, gerado_por}
-    plats.forEach(function (pl) { var a = adDe(p.id, pl.id); if (a && (a.titulo || a.descricao)) textos[pl.id] = { titulo: a.titulo || '', descricao: a.descricao || '', palavras_chave: a.palavras_chave || '', gerado_por: a.gerado_por || null }; });
-    var marcadas = {}; plats.forEach(function (pl) { marcadas[pl.id] = pl.id !== 'site'; });
-    var mudou = false;
-    var m = modal('<div class="row between"><div class="row" style="gap:10px">' + thumbHtml(p.fotos && p.fotos[0], p.fotos) + '<div><h2 style="margin:0">Anúncios</h2><div class="small muted">' + esc(p.nome) + '</div></div></div><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
-      (falta08() ? '<div class="note">Para gerar e guardar os textos, rode o <b>script 08</b> no SQL Editor do Supabase e atualize a página.</div>' : '') +
-      '<div class="card" style="padding:12px;box-shadow:none"><div class="lbl" style="margin-bottom:6px">Plataformas</div><div class="row wrap" style="gap:6px" id="an-plats">' +
-      plats.map(function (pl) { return '<button type="button" class="chip' + (marcadas[pl.id] ? ' on' : '') + '" data-pl="' + pl.id + '">' + esc(pl.nome) + (textos[pl.id] ? ' ✓' : '') + '</button>'; }).join('') + '</div>' +
-      '<div class="grid g2" style="margin-top:10px"><div class="field"><label for="an-motor">Quem escreve</label><select class="inp" id="an-motor">' + MOTORES.map(function (x) { return '<option value="' + x.v + '"' + (x.off ? ' disabled' : '') + '>' + esc(x.t) + '</option>'; }).join('') + '</select></div>' +
-      '<div class="field"><label for="an-extra">Pedido extra (opcional)</label><input class="inp" id="an-extra" placeholder="ex.: destacar que é presente de Dia das Crianças"></div></div>' +
-      '<div class="row between wrap" style="margin-top:6px"><span class="small muted" id="an-info">' + ((p.fotos || []).length ? 'A IA olha até 3 fotos do produto.' : 'Sem fotos: a IA usa só os dados do produto.') + '</span><button type="button" class="btn btn-p" id="an-gerar">✨ Gerar textos</button></div></div>' +
-      '<div id="an-res" class="stack" style="gap:12px"></div>' +
-      '<div class="row between wrap"><button type="button" class="btn btn-g" id="an-fotos">Baixar fotos</button><div class="row" style="gap:8px"><button class="btn btn-g" data-x="close">Fechar</button><button class="btn btn-p" id="an-salvar">Salvar textos</button></div></div>', { size: 'lg', noFocus: true, sticky: true });
+  // ------------------------------------------------------------------ página de anúncios de um produto
+  function falta09() { return !S.cfg || !('modelo_anuncio' in S.cfg); }
+  function adsDe(pid) { return S.anuncios.filter(function (a) { return a.produto_id === pid; }); }
+  function copiarTexto(txt) {
+    var fim = function () { toast('Copiado ✓'); };
+    if (navigator.clipboard) return navigator.clipboard.writeText(txt).then(fim, function () { velho(); });
+    velho();
+    function velho() { var ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); fim(); }
+  }
+  function tagsDe(a) { return String(a.palavras_chave || '').split(',').map(function (s) { s = s.trim().replace(/^#/, '').replace(/\s+/g, ''); return s ? '#' + s : ''; }).filter(Boolean).join(' '); }
+  function textoDoAd(a, k) {
+    if (k === 'palavras_chave') return a.plataforma_id === 'instagram' ? tagsDe(a) : (a.palavras_chave || '');
+    if (k === 'tudo') return a.plataforma_id === 'instagram' ? (a.descricao || '') + '\n\n' + tagsDe(a) : (a.titulo || '') + '\n\n' + (a.descricao || '');
+    return a[k] || '';
+  }
+  function novoAd(pid, pl, base) {
+    var o = base ? JSON.parse(JSON.stringify(base)) : {};
+    o.id = uid(); o.produto_id = pid; o.plataforma_id = pl || o.plataforma_id || 'shopee';
+    o.url = null; o.publicado = false; o._novo = true; delete o.criado_em;
+    return o;
+  }
+  async function duplicarProduto(pid) {
+    var p = byId(S.produtos, pid);
+    if (!(await confirmar('Duplicar produto?', 'Cria “' + p.nome + ' (cópia)” com as mesmas fotos, custos, insumos e textos de anúncio (sem os links e com estoque zero). Ele começa fora do site.', 'Duplicar'))) return;
+    try {
+      var o = JSON.parse(JSON.stringify(p));
+      ['id', 'criado_em', 'atualizado_em', 'codigo_site'].forEach(function (k) { delete o[k]; });
+      o.id = uid(); o.nome = p.nome + ' (cópia)'; o.estoque = 0; o.mostrar_no_site = false; o.destaque = false;
+      var np = q(await sb.from('produtos').insert(o).select().single());
+      var ins = S.prodInsumos.filter(function (x) { return x.produto_id === pid; }).map(function (x) { return { produto_id: np.id, insumo_id: x.insumo_id, quantidade: x.quantidade }; });
+      if (ins.length) q(await sb.from('produto_insumos').insert(ins));
+      var ads = falta09() ? [] : adsDe(pid).map(function (a) { var n = novoAd(np.id, a.plataforma_id, a); delete n._novo; return n; });
+      if (ads.length) q(await sb.from('produto_anuncios').insert(ads));
+      S.produtos.push(np); S.prodInsumos = S.prodInsumos.concat(ins); S.anuncios = S.anuncios.concat(ads);
+      toast('Produto duplicado ✓ — ajuste o nome e o que mudar');
+      go('#/produto/' + np.id);
+    } catch (err) { toast('Não duplicou: ' + erroMsg(err), true); }
+  }
 
+  function telaAnuncio(v, pid) {
+    var p = byId(S.produtos, pid);
+    if (!p) { setHeader('Anúncios'); v.innerHTML = '<div class="card">Produto não encontrado. <a href="#/anuncios">Voltar</a></div>'; return; }
+    setHeader('Anúncios · ' + p.nome, '<button class="btn btn-g hide-m" id="an-dupprod">Duplicar produto</button><a class="btn btn-g" href="#/produto/' + p.id + '">Produto</a><a class="btn btn-g" href="#/anuncios">Voltar</a>');
+    $('#an-dupprod').addEventListener('click', function () { if (dirty) return toast('Salve os anúncios antes', true); duplicarProduto(p.id); });
+    if (falta08() || falta09()) {
+      v.innerHTML = '<div class="card note">Para usar esta tela, rode os scripts <b>08</b> e <b>09</b> no SQL Editor do Supabase e atualize a página (Ctrl+F5).</div>';
+      return;
+    }
+    var plats = platsAnuncio();
+    var lista = adsDe(p.id).map(function (a) { return JSON.parse(JSON.stringify(a)); })
+      .sort(function (a, b) { return (byId(plats, a.plataforma_id) || {}).ordem - (byId(plats, b.plataforma_id) || {}).ordem || String(a.criado_em || '').localeCompare(String(b.criado_em || '')); });
+    var removidos = [];
+    var marcadas = {}; plats.forEach(function (pl) { marcadas[pl.id] = pl.id !== 'site'; });
+    var platOpts = function (sel) { return plats.map(function (pl) { return '<option value="' + pl.id + '"' + (pl.id === sel ? ' selected' : '') + '>' + esc(pl.nome) + '</option>'; }).join(''); };
+
+    v.innerHTML = '<div class="stack">' +
+      '<div class="card"><div class="row wrap" style="gap:14px;align-items:flex-start">' + ((p.fotos || []).length ? '<div class="an-fotos">' + p.fotos.slice(0, 4).map(function (f) { return thumbHtml(f, p.fotos); }).join('') + '</div>' : '') +
+      '<div class="grow" style="min-width:240px"><div class="lbl" style="margin-bottom:6px">Gerar com IA para</div><div class="row wrap" style="gap:6px" id="an-plats">' +
+      plats.map(function (pl) { return '<button type="button" class="chip' + (marcadas[pl.id] ? ' on' : '') + '" data-pl="' + pl.id + '">' + esc(pl.nome) + '</button>'; }).join('') + '</div>' +
+      '<div class="grid g2" style="margin-top:10px"><div class="field"><label for="an-motor">Quem escreve</label><select class="inp" id="an-motor">' + MOTORES.map(function (x) { return '<option value="' + x.v + '"' + (x.off ? ' disabled' : '') + '>' + esc(x.t) + '</option>'; }).join('') + '</select></div>' +
+      '<div class="field"><label for="an-extra">Pedido extra (opcional)</label><input class="inp" id="an-extra" placeholder="ex.: destacar que é presente de Natal"></div></div>' +
+      '<div class="row between wrap" style="margin-top:6px"><span class="small muted" id="an-info">' + ((p.fotos || []).length ? 'A IA olha até 3 fotos do produto. Cada plataforma escolhida ganha um anúncio novo (ou reescreve o primeiro que já existir).' : 'Sem fotos: a IA usa só os dados do produto.') + '</span>' +
+      '<div class="row" style="gap:6px"><button type="button" class="btn btn-g" id="an-fotos">Baixar fotos</button><button type="button" class="btn btn-p" id="an-gerar">✨ Gerar textos</button></div></div></div></div></div>' +
+      '<div class="row between wrap"><h2 style="margin:0">Anúncios deste produto</h2><div class="row" style="gap:6px"><select class="inp" id="an-novo-pl" aria-label="Plataforma do anúncio novo" style="width:auto">' + platOpts('shopee') + '</select><button type="button" class="btn btn-g" id="an-add">+ Anúncio</button></div></div>' +
+      '<div id="an-lista" class="stack" style="gap:14px"></div>' +
+      '<div class="sticky-save"><a class="btn btn-g" href="#/anuncios">Cancelar</a><button type="button" class="btn btn-p" id="an-salvar">Salvar anúncios</button></div></div>';
+
+    function cartao(a, i) {
+      var pl = byId(plats, a.plataforma_id) || { id: a.plataforma_id, nome: a.plataforma_id }, lim = LIM_TITULO[pl.id] || 80;
+      var sug = precoPlataforma(num(p.preco), pl) || num(p.preco), n = (a.titulo || '').length, mesmo = lista.filter(function (x) { return x.plataforma_id === a.plataforma_id; }).length;
+      return '<div class="card an-card" data-i="' + i + '">' +
+        '<div class="row between wrap" style="gap:8px"><div class="row wrap" style="gap:8px"><select class="inp" data-f="plataforma_id" aria-label="Plataforma" style="width:auto;font-weight:800">' + platOpts(a.plataforma_id) + '</select>' +
+        '<input class="inp" data-f="apelido" value="' + esc(a.apelido || '') + '" placeholder="' + (mesmo > 1 ? 'apelido (ex.: kit com 10)' : 'apelido (opcional)') + '" style="width:200px" aria-label="Apelido do anúncio">' +
+        (a.gerado_por ? '<span class="small muted">' + esc(a.gerado_por === 'manual' ? 'modelo pronto' : a.gerado_por) + '</span>' : '') + '</div>' +
+        '<div class="row wrap" style="gap:6px"><button type="button" class="btn btn-g btn-s" data-ac="ia" title="Reescrever só este com a IA">✨ Reescrever</button><button type="button" class="btn btn-g btn-s" data-ac="dup">Duplicar</button><button type="button" class="btn btn-g btn-s" data-ac="outro">Copiar para outro produto</button><button type="button" class="icon-btn" data-ac="del" aria-label="Excluir anúncio">' + BTN_DEL + '</button></div></div>' +
+        '<div class="grid g4" style="margin-top:10px"><div class="field"><label>Preço nesta plataforma (R$)</label><input class="inp" data-f="preco" inputmode="decimal" value="' + esc(fmtIn(a.preco)) + '" placeholder="' + esc(sug ? fmtIn(sug.toFixed(2)) : '') + '"><div class="hint">' + (sug ? 'sugerido com a taxa: ' + brl(sug) : '') + '</div></div>' +
+        '<div class="field" style="grid-column:span 2"><label>Link do anúncio publicado</label><div class="row" style="gap:6px"><input class="inp" data-f="url" value="' + esc(a.url || '') + '" placeholder="cole o link depois de publicar">' + (isUrl(a.url) ? '<a class="btn btn-g btn-s" href="' + esc(a.url) + '" target="_blank" rel="noopener">Abrir ' + ICON.ext + '</a>' : '') + '</div></div>' +
+        '<div style="align-self:end"><label class="check"><input type="checkbox" data-f="publicado"' + (a.publicado ? ' checked' : '') + '> Publicado</label></div></div>' +
+        '<div class="field"><div class="row between"><label>Título</label><div class="row" style="gap:8px"><span class="small ' + (n > lim ? 'bad-t' : 'muted') + '" data-cont>' + n + '/' + lim + '</span><button type="button" class="btn btn-g btn-s" data-cp="titulo">Copiar</button></div></div><input class="inp" data-f="titulo" value="' + esc(a.titulo || '') + '"></div>' +
+        '<div class="field"><div class="row between"><label>Descrição</label><button type="button" class="btn btn-g btn-s" data-cp="descricao">Copiar</button></div><textarea class="inp" data-f="descricao" rows="12">' + esc(a.descricao || '') + '</textarea></div>' +
+        '<div class="field"><div class="row between"><label>' + (pl.id === 'instagram' ? 'Hashtags' : 'Palavras-chave') + '</label><button type="button" class="btn btn-g btn-s" data-cp="palavras_chave">Copiar</button></div><input class="inp" data-f="palavras_chave" value="' + esc(a.palavras_chave || '') + '"></div>' +
+        '<div class="row wrap" style="gap:6px;justify-content:flex-end"><button type="button" class="btn btn-g" data-cp="tudo">Copiar tudo</button>' + (LINK_ANUNCIAR[pl.id] ? '<a class="btn btn-p" href="' + LINK_ANUNCIAR[pl.id] + '" target="_blank" rel="noopener">Anunciar no ' + esc(pl.nome) + ' ' + ICON.ext + '</a>' : '') + '</div></div>';
+    }
     function draw() {
-      var ids = plats.filter(function (pl) { return textos[pl.id] || marcadas[pl.id]; });
-      $('#an-res', m).innerHTML = ids.filter(function (pl) { return textos[pl.id]; }).map(function (pl) {
-        var t = textos[pl.id], lim = LIM_TITULO[pl.id] || 80, preco = precoNa(p, pl), n = (t.titulo || '').length;
-        return '<div class="an-card" data-pl="' + pl.id + '"><div class="row between wrap"><div class="row" style="gap:8px"><b>' + esc(pl.nome) + '</b>' + (preco ? '<span class="pill p-info">' + brl(preco) + '</span>' : '') + (t.gerado_por ? '<span class="small muted">' + esc(t.gerado_por === 'manual' ? 'modelo pronto' : t.gerado_por) + '</span>' : '') + '</div>' +
-          '<div class="row" style="gap:6px"><button type="button" class="btn btn-g btn-s" data-cp="tudo">Copiar tudo</button>' + (LINK_ANUNCIAR[pl.id] ? '<a class="btn btn-g btn-s" href="' + LINK_ANUNCIAR[pl.id] + '" target="_blank" rel="noopener">Anunciar ' + ICON.ext + '</a>' : '') + '</div></div>' +
-          '<div class="field" style="margin-top:8px"><div class="row between"><label>Título</label><span class="small ' + (n > lim ? 'bad-t' : 'muted') + '" data-cont>' + n + '/' + lim + '</span></div><div class="row" style="gap:6px"><input class="inp" data-t="titulo" value="' + esc(t.titulo) + '"><button type="button" class="btn btn-g btn-s" data-cp="titulo">Copiar</button></div></div>' +
-          '<div class="field"><div class="row between"><label>Descrição</label><button type="button" class="btn btn-g btn-s" data-cp="descricao">Copiar</button></div><textarea class="inp" data-t="descricao" rows="8">' + esc(t.descricao) + '</textarea></div>' +
-          '<div class="field"><div class="row between"><label>' + (pl.id === 'instagram' ? 'Hashtags' : 'Palavras-chave') + '</label><button type="button" class="btn btn-g btn-s" data-cp="palavras_chave">Copiar</button></div><input class="inp" data-t="palavras_chave" value="' + esc(t.palavras_chave) + '"></div></div>';
-      }).join('') || '<div class="muted small" style="text-align:center;padding:10px 0">Escolha as plataformas e clique em <b>Gerar textos</b>.</div>';
-    }
-    function textoCopia(plId, k) {
-      var t = textos[plId];
-      var tags = function () { return plId === 'instagram' ? String(t.palavras_chave || '').split(',').map(function (s) { s = s.trim().replace(/^#/, '').replace(/\s+/g, ''); return s ? '#' + s : ''; }).filter(Boolean).join(' ') : t.palavras_chave; };
-      if (k === 'palavras_chave') return tags();
-      if (k === 'tudo') return plId === 'instagram' ? t.descricao + '\n\n' + tags() : t.titulo + '\n\n' + t.descricao;
-      return t[k] || '';
-    }
-    async function copiar(txt) {
-      try { await navigator.clipboard.writeText(txt); } catch (x) { var ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
-      toast('Copiado ✓');
+      $('#an-lista').innerHTML = lista.length ? lista.map(cartao).join('') : '<div class="card empty">Nenhum anúncio ainda. Escolha as plataformas lá em cima e clique em <b>Gerar textos</b>, ou use <b>+ Anúncio</b>.</div>';
     }
     draw();
-    $('#an-plats', m).addEventListener('click', function (e) { var b = e.target.closest('[data-pl]'); if (!b) return; marcadas[b.dataset.pl] = !marcadas[b.dataset.pl]; b.classList.toggle('on', marcadas[b.dataset.pl]); });
-    $('#an-res', m).addEventListener('input', function (e) {
-      var c = e.target.closest('[data-pl]'), k = e.target.dataset.t; if (!c || !k) return;
-      textos[c.dataset.pl][k] = e.target.value; mudou = true;
-      if (k === 'titulo') { var lim = LIM_TITULO[c.dataset.pl] || 80, n = e.target.value.length, el = $('[data-cont]', c); el.textContent = n + '/' + lim; el.className = 'small ' + (n > lim ? 'bad-t' : 'muted'); }
+    var L = $('#an-lista');
+    L.addEventListener('input', function (e) {
+      var c = e.target.closest('[data-i]'), k = e.target.dataset.f; if (!c || !k) return;
+      var a = lista[+c.dataset.i]; dirty = true;
+      if (k === 'preco') a.preco = num(e.target.value);
+      else if (k !== 'publicado' && k !== 'plataforma_id') a[k] = e.target.value;
+      if (k === 'titulo') { var lim = LIM_TITULO[a.plataforma_id] || 80, n = e.target.value.length, el = $('[data-cont]', c); el.textContent = n + '/' + lim; el.className = 'small ' + (n > lim ? 'bad-t' : 'muted'); }
     });
-    $('#an-res', m).addEventListener('click', function (e) { var b = e.target.closest('[data-cp]'), c = e.target.closest('[data-pl]'); if (b && c) copiar(textoCopia(c.dataset.pl, b.dataset.cp)); });
-    $('#an-gerar', m).addEventListener('click', async function () {
+    L.addEventListener('change', function (e) {
+      var c = e.target.closest('[data-i]'), k = e.target.dataset.f; if (!c || !k) return;
+      var a = lista[+c.dataset.i]; dirty = true;
+      if (k === 'publicado') a.publicado = e.target.checked;
+      if (k === 'plataforma_id') { a.plataforma_id = e.target.value; draw(); }
+      if (k === 'url') { a.url = e.target.value.trim() || null; if (isUrl(a.url)) a.publicado = true; draw(); }
+    });
+    L.addEventListener('click', async function (e) {
+      var c = e.target.closest('[data-i]'); if (!c) return;
+      var i = +c.dataset.i, a = lista[i];
+      var cp = e.target.closest('[data-cp]'); if (cp) return copiarTexto(textoDoAd(a, cp.dataset.cp));
+      var ac = e.target.closest('[data-ac]'); if (!ac) return;
+      if (ac.dataset.ac === 'dup') { var d = novoAd(p.id, a.plataforma_id, a); d.apelido = (a.apelido ? a.apelido + ' ' : '') + '(cópia)'; lista.splice(i + 1, 0, d); dirty = true; draw(); toast('Anúncio duplicado — mude o que quiser e salve'); var el = $('[data-i="' + (i + 1) + '"]'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      if (ac.dataset.ac === 'del') { if (!(await confirmar('Excluir este anúncio?', 'Apaga o texto e o link guardados aqui (o anúncio na plataforma não é afetado).', 'Excluir', true))) return; if (!a._novo) removidos.push(a.id); lista.splice(i, 1); dirty = true; draw(); }
+      if (ac.dataset.ac === 'outro') copiarParaOutro(a);
+      if (ac.dataset.ac === 'ia') gerar([a], ac);
+    });
+    function copiarParaOutro(a) {
+      var m = modal('<div class="row between"><h2>Copiar anúncio para outro produto</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
+        '<div class="field"><label for="cp-prod">Produto</label><select class="inp" id="cp-prod">' + selProdutos('', '— escolher —') + '</select></div>' +
+        '<div class="hint">O texto vai sem o link e sem “publicado”. Depois é só abrir os anúncios do outro produto e ajustar.</div>' +
+        '<div class="row" style="justify-content:flex-end"><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="ok">Copiar</button></div>', { size: 'sm' });
+      m.addEventListener('click', async function (e) {
+        var b = e.target.closest('[data-x]'); if (!b) return;
+        if (b.dataset.x === 'close') return closeModal();
+        var dest = $('#cp-prod', m).value; if (!dest) return toast('Escolha o produto', true);
+        try {
+          var n = novoAd(dest, a.plataforma_id, a); delete n._novo;
+          var r = q(await sb.from('produto_anuncios').insert(n).select().single());
+          S.anuncios.push(r || n); closeModal(); toast('Copiado para “' + nomeProduto(dest) + '” ✓');
+        } catch (err) { toast(erroMsg(err), true); }
+      });
+    }
+    $('#an-add').addEventListener('click', function () { lista.push(novoAd(p.id, $('#an-novo-pl').value)); dirty = true; draw(); var el = $('[data-i="' + (lista.length - 1) + '"]'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+    $('#an-plats').addEventListener('click', function (e) { var b = e.target.closest('[data-pl]'); if (!b) return; marcadas[b.dataset.pl] = !marcadas[b.dataset.pl]; b.classList.toggle('on', marcadas[b.dataset.pl]); });
+
+    // gerar: alvos = anúncios que recebem o texto (um por plataforma)
+    async function gerar(alvos, btn) {
+      var motor = $('#an-motor').value, extra = $('#an-extra').value.trim() || null;
+      var platsAlvo = alvos.map(function (a) { return byId(plats, a.plataforma_id) || { id: a.plataforma_id, nome: a.plataforma_id }; });
+      if (motor === 'manual') {
+        alvos.forEach(function (a, i) { var t = textoManual(p, platsAlvo[i]); a.titulo = t.titulo; a.descricao = t.descricao; a.palavras_chave = t.palavras_chave; a.gerado_por = 'manual'; });
+        dirty = true; draw(); return;
+      }
+      var txt = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Escrevendo…';
+      $('#an-info').textContent = 'O Gemini está olhando as fotos e escrevendo (uns 10 a 30 segundos)…';
+      try {
+        var d = await chamarGemini({ prompt: montarPrompt(p, platsAlvo, extra), fotos: (p.fotos || []).filter(isUrl).slice(0, 3), modelo: (S.cfg || {}).ia_modelo || 'gemini-3.8-flash' });
+        var n = 0;
+        (d.anuncios || []).forEach(function (r) {
+          var id = String(r.plataforma || '').toLowerCase();
+          var a = alvos.filter(function (x) { return x.plataforma_id === id && !x._feito; })[0]; if (!a) return;
+          a.titulo = r.titulo || ''; a.descricao = r.descricao || ''; a.palavras_chave = (r.palavras_chave || []).join(', '); a.gerado_por = d.modelo || 'gemini'; a._feito = true; n++;
+        });
+        alvos.forEach(function (a) { delete a._feito; });
+        dirty = true; draw();
+        $('#an-info').textContent = n + ' anúncio(s) prontos · ' + (d.modelo || 'Gemini') + (d.fotos ? ' · olhou ' + d.fotos + ' foto(s)' : '') + '. Revise e clique em Salvar anúncios.';
+      } catch (err) { $('#an-info').textContent = ''; toast(err.message, true); }
+      btn.disabled = false; btn.innerHTML = txt;
+    }
+    $('#an-gerar').addEventListener('click', function () {
       var escolha = plats.filter(function (pl) { return marcadas[pl.id]; });
       if (!escolha.length) return toast('Escolha ao menos uma plataforma', true);
-      var motor = $('#an-motor', m).value, btn = this;
-      if (motor === 'manual') {
-        escolha.forEach(function (pl) { var t = textoManual(p, pl); t.gerado_por = 'manual'; textos[pl.id] = t; });
-        mudou = true; draw(); return;
-      }
-      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Escrevendo…';
-      $('#an-info', m).textContent = 'O Gemini está olhando as fotos e escrevendo (uns 10 a 30 segundos)…';
-      try {
-        var cfg = S.cfg || {};
-        var d = await chamarGemini({
-          produto: dadosProdutoIA(p), fotos: (p.fotos || []).filter(isUrl).slice(0, 3),
-          plataformas: escolha.map(function (pl) { return { id: pl.id, nome: pl.nome, permite_contato: !!pl.permite_contato, limite_titulo: LIM_TITULO[pl.id] || 80, preco: precoNa(p, pl) }; }),
-          regras: cfg.regras_anuncio || '', contato: { whatsapp: cfg.whatsapp, retirada: cfg.local_retirada, entrega: cfg.formas_entrega, cidade: 'Curitiba-PR' },
-          instrucoes: $('#an-extra', m).value.trim() || null, modelo: cfg.ia_modelo || 'gemini-3.8-flash'
-        });
-        var n = 0;
-        (d.anuncios || []).forEach(function (a) {
-          var id = String(a.plataforma || '').toLowerCase(); if (!byId(escolha, id)) return;
-          textos[id] = { titulo: a.titulo || '', descricao: a.descricao || '', palavras_chave: (a.palavras_chave || []).join(', '), gerado_por: d.modelo || 'gemini' }; n++;
-        });
-        mudou = true; draw();
-        $('#an-info', m).textContent = n + ' anúncio(s) prontos · ' + (d.modelo || 'Gemini') + (d.fotos ? ' · olhou ' + d.fotos + ' foto(s)' : '') + '. Revise antes de publicar.';
-      } catch (err) { $('#an-info', m).textContent = ''; toast(err.message, true); }
-      btn.disabled = false; btn.textContent = '✨ Gerar de novo';
+      var alvos = escolha.map(function (pl) {
+        var a = lista.filter(function (x) { return x.plataforma_id === pl.id; })[0];
+        if (!a) { a = novoAd(p.id, pl.id); lista.push(a); }
+        return a;
+      });
+      gerar(alvos, this);
     });
-    $('#an-fotos', m).addEventListener('click', async function () {
+    $('#an-fotos').addEventListener('click', async function () {
       var fs = (p.fotos || []).filter(isUrl); if (!fs.length) return toast('Este produto não tem fotos', true);
       for (var i = 0; i < fs.length; i++) {
         try {
@@ -2825,21 +2942,19 @@
         } catch (x) { window.open(fs[i], '_blank', 'noopener'); }
       }
     });
-    $('#an-salvar', m).addEventListener('click', async function () {
-      if (falta08()) return toast('Rode o script 08 no Supabase primeiro', true);
-      var agora = new Date().toISOString();
-      var rows = Object.keys(textos).map(function (k) { var t = textos[k]; return { produto_id: p.id, plataforma_id: k, titulo: t.titulo || null, descricao: t.descricao || null, palavras_chave: t.palavras_chave || null, gerado_por: t.gerado_por || null, gerado_em: agora, atualizado_em: agora }; });
-      if (!rows.length) return toast('Nada para salvar ainda', true);
+    $('#an-salvar').addEventListener('click', async function () {
+      var btn = this, agora = new Date().toISOString();
+      var rows = lista.map(function (a) {
+        return { id: a.id, produto_id: p.id, plataforma_id: a.plataforma_id, apelido: (a.apelido || '').trim() || null, titulo: a.titulo || null, descricao: a.descricao || null, palavras_chave: a.palavras_chave || null, preco: num(a.preco), url: a.url || null, publicado: !!a.publicado, gerado_por: a.gerado_por || null, gerado_em: a.gerado_em || (a.gerado_por ? agora : null), atualizado_em: agora };
+      });
+      btn.disabled = true;
       try {
-        var salvos = q(await sb.from('produto_anuncios').upsert(rows).select());
-        (salvos || rows).forEach(function (r) { var a = adDe(r.produto_id, r.plataforma_id); if (a) Object.assign(a, r); else S.anuncios.push(r); });
-        mudou = false; toast('Textos salvos ✓'); closeModal(); if (aoSalvar) aoSalvar();
+        if (removidos.length) q(await sb.from('produto_anuncios').delete().in('id', removidos));
+        var salvos = rows.length ? q(await sb.from('produto_anuncios').upsert(rows).select()) : [];
+        S.anuncios = S.anuncios.filter(function (x) { return x.produto_id !== p.id; }).concat(salvos || rows);
+        dirty = false; toast('Anúncios salvos ✓'); render();
       } catch (err) { toast('Não salvou: ' + erroMsg(err), true); }
-    });
-    m.addEventListener('click', async function (e) {
-      var b = e.target.closest('[data-x="close"]'); if (!b) return;
-      if (mudou && !(await confirmar('Sair sem salvar?', 'Os textos gerados ou editados ainda não foram salvos.', 'Sair sem salvar', true))) return;
-      closeModal();
+      btn.disabled = false;
     });
   }
 
@@ -2849,10 +2964,10 @@
     var plats = platsAnuncio().filter(function (pl) { return pl.id !== 'site'; });
     var busca = S.ui.busca.anuncios || '', falta = S.ui.anFalta || '';
     var lista = S.produtos.filter(function (p) { return p.ativo; }).filter(function (p) {
-      if (falta) { var a = adDe(p.id, falta); if (a && (a.publicado || a.url)) return false; }
+      if (falta && S.anuncios.some(function (a) { return a.produto_id === p.id && a.plataforma_id === falta && (a.publicado || a.url); })) return false;
       return combina([p.nome, p.categoria, p.material], busca);
     }).sort(function (a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); });
-    var est = function (p, pl) { var a = adDe(p.id, pl.id); if (a && (a.publicado || isUrl(a.url))) return 'pub'; if (a && a.titulo) return 'txt'; return ''; };
+    var est = function (p, pl) { var l = S.anuncios.filter(function (a) { return a.produto_id === p.id && a.plataforma_id === pl.id; }); if (l.some(function (a) { return a.publicado || isUrl(a.url); })) return 'pub'; if (l.some(function (a) { return a.titulo; })) return 'txt'; return ''; };
     var nPub = 0, nTxt = 0;
     S.produtos.filter(function (p) { return p.ativo; }).forEach(function (p) { plats.forEach(function (pl) { var e = est(p, pl); if (e === 'pub') nPub++; else if (e === 'txt') nTxt++; }); });
     v.innerHTML = '<div class="stack">' +
@@ -2870,7 +2985,7 @@
         }).join('') + '</tbody></table></div></div>' : (busca ? nadaAchado('anuncios') : '<div class="card empty">Nenhum produto aqui. 🎉</div>'));
     ligarBusca('anuncios');
     $('#an-falta').addEventListener('change', function (e) { S.ui.anFalta = e.target.value; render(); });
-    v.onclick = function (e) { var b = e.target.closest('[data-an]'); if (b) abrirAnuncios(b.dataset.an, function () { render(); }); };
+    v.onclick = function (e) { var b = e.target.closest('[data-an]'); if (b) go('#/anuncio/' + b.dataset.an); };
   }
 
   // ------------------------------------------------------------------ configurações da IA
@@ -2879,6 +2994,7 @@
     if (falta08()) return '<div class="card"><h2>Anúncios com IA</h2><div class="note">Rode o <b>script 08</b> no SQL Editor do Supabase e atualize a página para configurar.</div></div>';
     return '<div class="card"><h2>Anúncios com IA</h2><div class="stack">' +
       '<div class="field"><label for="ia-regras">Regras que todo anúncio segue</label><textarea class="inp" id="ia-regras" rows="5">' + esc(c.regras_anuncio || '') + '</textarea><div class="hint">Uma por linha. A IA adapta ao estilo de cada plataforma (nos marketplaces ela não coloca WhatsApp, porque é proibido lá).</div></div>' +
+      ('modelo_anuncio' in c ? '<div class="field"><label for="ia-exemplo">Anúncio modelo (a IA copia a estrutura e o tom)</label><textarea class="inp" id="ia-exemplo" rows="10">' + esc(c.modelo_anuncio || '') + '</textarea><div class="hint">Cole aqui um anúncio que vocês gostam. Troque quando quiserem mudar o estilo.</div></div>' : '<div class="note">Rode o <b>script 09</b> para guardar o anúncio modelo da Fran.</div>') +
       '<div class="grid g2"><div class="field"><label for="ia-modelo">Modelo do Gemini</label><input class="inp" id="ia-modelo" value="' + esc(c.ia_modelo || 'gemini-3.8-flash') + '"><div class="hint">Se esse sair do ar, o sistema tenta sozinho o mais novo disponível.</div></div>' +
       '<div class="row" style="align-items:flex-end;justify-content:flex-end;gap:8px"><button class="btn btn-g" id="ia-testar" type="button">Testar conexão</button><button class="btn btn-p" id="ia-salvar" type="button">Salvar</button></div></div>' +
       '<details class="note"><summary style="cursor:pointer;font-weight:700">Como ligar o Gemini (uma vez só)</summary><ol style="margin:8px 0 0 18px;padding:0;line-height:1.7">' +
@@ -2890,7 +3006,7 @@
   function ligarIAConfig() {
     if (!$('#ia-salvar')) return;
     $('#ia-salvar').addEventListener('click', async function () {
-      try { S.cfg = q(await sb.from('configuracoes').update({ regras_anuncio: $('#ia-regras').value.trim() || null, ia_modelo: $('#ia-modelo').value.trim() || 'gemini-3.8-flash', atualizado_em: new Date().toISOString() }).eq('id', 1).select().single()); toast('Regras dos anúncios salvas ✓'); }
+      try { S.cfg = q(await sb.from('configuracoes').update(Object.assign({ regras_anuncio: $('#ia-regras').value.trim() || null, ia_modelo: $('#ia-modelo').value.trim() || 'gemini-3.8-flash', atualizado_em: new Date().toISOString() }, $('#ia-exemplo') ? { modelo_anuncio: $('#ia-exemplo').value.trim() || null } : {})).eq('id', 1).select().single()); toast('Regras dos anúncios salvas ✓'); }
       catch (err) { toast(erroMsg(err), true); }
     });
     $('#ia-testar').addEventListener('click', async function () {
