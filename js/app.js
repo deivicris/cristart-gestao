@@ -701,7 +701,7 @@
     };
     var itens = S.prodInsumos.filter(function (x) { return x.produto_id === p.id; }).map(function (x) { return { insumo_id: x.insumo_id, quantidade: x.quantidade }; });
 
-    setHeader(novo ? 'Novo produto' : p.nome, (novo ? '' : '<button class="btn btn-g hide-m" id="pq-imp">+ Impressão</button><button class="btn btn-g hide-m" id="pq-venda">+ Venda</button>') + '<a class="btn btn-g" href="#/produtos">Voltar</a>');
+    setHeader(novo ? 'Novo produto' : p.nome, (novo ? '' : (orig.ativo && orig.mostrar_no_site ? '<a class="btn btn-g hide-m" href="' + esc(((window.CRISTART_CONFIG || {}).siteUrl || 'https://www.cristart3d.com.br/') + '#/produto/' + encodeURIComponent(orig.codigo_site || orig.id)) + '" target="_blank" rel="noopener">Ver no site ' + ICON.ext + '</a>' : '') + '<button class="btn btn-g hide-m" id="pq-imp">+ Impressão</button><button class="btn btn-g hide-m" id="pq-venda">+ Venda</button>') + '<a class="btn btn-g" href="#/produtos">Voltar</a>');
     if (!novo) {
       $('#pq-imp').addEventListener('click', function () { if (dirty) return toast('Salve o produto antes', true); registrarImpressao(p.id); });
       $('#pq-venda').addEventListener('click', function () { if (dirty) return toast('Salve o produto antes', true); registrarVenda(p.id); });
@@ -714,7 +714,7 @@
     ];
     var fFlags = [
       { k: 'ativo', label: 'Ativo', type: 'check' },
-      { k: 'mostrar_no_site', label: 'Mostrar no site', type: 'check' },
+      { k: 'mostrar_no_site', label: 'Mostrar no site (entra sozinho no cristart3d.com.br)', type: 'check' },
       { k: 'destaque', label: 'Destaque', type: 'check' }
     ];
     var fTextos = [
