@@ -346,6 +346,8 @@
     S.impressoes = q(r[9]) || [];
     S.perdas = q(r[10]) || [];
     S.vendas = q(r[11]) || [];
+    var r11 = await sb.from('produto_anuncios').select('arquivado').limit(1);
+    S.falta11 = !!r11.error;
     var rc = await sb.from('carreteis').select('*');
     S.carreteis = rc.error ? [] : (rc.data || []);
     S.faltaScript04 = !!rc.error;
@@ -634,7 +636,7 @@
       var b = S.ui.prodBusca.toLowerCase(), c = S.ui.prodCat, st = S.ui.prodStatus;
       var list = S.produtos.filter(function (p) {
         if (b) {
-          var ads = S.anuncios.filter(function (a) { return a.produto_id === p.id && (a.url || a.publicado); });
+          var ads = S.anuncios.filter(function (a) { return a.produto_id === p.id && !a.arquivado && (a.url || a.publicado); });
           var txt = [p.nome, p.categoria, p.material, p.descricao_breve, p.medidas, p.tipo_produto === 'revenda' ? 'revenda' : 'impresso', p.codigo_site]
             .concat(ads.map(function (a) { var pl = byId(S.plataformas, a.plataforma_id); return (pl ? pl.nome : a.plataforma_id); }), ads.map(function (a) { return a.url; }));
           if (!combina(txt, b)) return false;
@@ -2019,7 +2021,7 @@
       '<div class="row" style="justify-content:flex-end"><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Registrar venda</button></div>');
     var mexeuV = false, mexeuT = false;
     function precoUnit(p, canal, pag) {
-      var ad = S.anuncios.filter(function (a) { return a.produto_id === p.id && a.plataforma_id === canal; })[0];
+      var ad = S.anuncios.filter(function (a) { return a.produto_id === p.id && a.plataforma_id === canal && !a.arquivado; })[0];
       if (ad && num(ad.preco)) return { v: num(ad.preco), de: 'preço anunciado em ' + nomePlat(canal) };
       if (/crédito/.test(pag) && num(p.preco_cartao)) return { v: num(p.preco_cartao), de: 'preço no cartão' };
       return { v: num(p.preco) || 0, de: 'preço Pix / site' };
@@ -2688,7 +2690,10 @@
   ];
   function falta08() { return !S.cfg || !('regras_anuncio' in S.cfg); }
   function platsAnuncio() { return S.plataformas.filter(function (pl) { return pl.ativa; }); }
-  function adDe(pid, pl) { return S.anuncios.filter(function (a) { return a.produto_id === pid && a.plataforma_id === pl; })[0] || null; }
+  function platsVerIds() { try { var v = JSON.parse(localStorage.getItem('cristart_plats_ver') || 'null'); return Array.isArray(v) ? v : null; } catch (e) { return null; } }
+  function platsVisiveis() { var ids = S.ui.platsVer || platsVerIds(); var l = platsAnuncio().filter(function (pl) { return pl.id !== 'site'; }); return ids ? l.filter(function (pl) { return ids.indexOf(pl.id) >= 0; }) : l; }
+  function guardarPlatsVer(ids) { S.ui.platsVer = ids; try { localStorage.setItem('cristart_plats_ver', JSON.stringify(ids)); } catch (e) { } }
+  function adDe(pid, pl) { return S.anuncios.filter(function (a) { return a.produto_id === pid && a.plataforma_id === pl && !a.arquivado; })[0] || null; }
   function precoNa(p, pl) { var a = adDe(p.id, pl.id); if (a && num(a.preco)) return num(a.preco); var v = precoPlataforma(num(p.preco), pl); return v || num(p.preco) || null; }
   function dadosProdutoIA(p) {
     var o = { nome: p.nome, categoria: p.categoria, descricao_breve: p.descricao_breve, descricao: p.descricao, medidas: p.medidas, peso_g: num(p.peso_g), tipo: p.tipo_produto === 'revenda' ? 'produto de revenda' : 'produzido em impressão 3D', pronta_entrega: p.estoque > 0 ? p.estoque + ' unidade(s) em estoque' : 'sob encomenda', preco_pix_site: num(p.preco) };
@@ -2771,7 +2776,8 @@
 
   // ------------------------------------------------------------------ página de anúncios de um produto
   function falta09() { return !S.cfg || !('modelo_anuncio' in S.cfg); }
-  function adsDe(pid) { return S.anuncios.filter(function (a) { return a.produto_id === pid; }); }
+  function adsDe(pid) { return S.anuncios.filter(function (a) { return a.produto_id === pid && !a.arquivado; }); }
+  function arquivadosDe(pid) { return S.anuncios.filter(function (a) { return a.produto_id === pid && a.arquivado; }).sort(function (a, b) { return String(b.arquivado_em || '').localeCompare(String(a.arquivado_em || '')); }); }
   function copiarTexto(txt) {
     var fim = function () { toast('Copiado ✓'); };
     if (navigator.clipboard) return navigator.clipboard.writeText(txt).then(fim, function () { velho(); });
@@ -2821,29 +2827,34 @@
     var lista = adsDe(p.id).map(function (a) { return JSON.parse(JSON.stringify(a)); })
       .sort(function (a, b) { return (byId(plats, a.plataforma_id) || {}).ordem - (byId(plats, b.plataforma_id) || {}).ordem || String(a.criado_em || '').localeCompare(String(b.criado_em || '')); });
     var removidos = [];
-    var marcadas = {}; plats.forEach(function (pl) { marcadas[pl.id] = pl.id !== 'site'; });
+    var marcadas = {};
+    var selDel = {};
+    var visiveis = platsVisiveis();
     var platOpts = function (sel) { return plats.map(function (pl) { return '<option value="' + pl.id + '"' + (pl.id === sel ? ' selected' : '') + '>' + esc(pl.nome) + '</option>'; }).join(''); };
 
     v.innerHTML = '<div class="stack">' +
-      '<div class="card"><div class="row wrap" style="gap:14px;align-items:flex-start">' + ((p.fotos || []).length ? '<div class="an-fotos">' + p.fotos.slice(0, 4).map(function (f) { return thumbHtml(f, p.fotos); }).join('') + '</div>' : '') +
-      '<div class="grow" style="min-width:240px"><div class="lbl" style="margin-bottom:6px">Gerar com IA para</div><div class="row wrap" style="gap:6px" id="an-plats">' +
-      plats.map(function (pl) { return '<button type="button" class="chip' + (marcadas[pl.id] ? ' on' : '') + '" data-pl="' + pl.id + '">' + esc(pl.nome) + '</button>'; }).join('') + '</div>' +
-      '<div class="grid g2" style="margin-top:10px"><div class="field"><label for="an-motor">Quem escreve</label><select class="inp" id="an-motor">' + MOTORES.map(function (x) { return '<option value="' + x.v + '"' + (x.off ? ' disabled' : '') + '>' + esc(x.t) + '</option>'; }).join('') + '</select></div>' +
-      '<div class="field"><label for="an-extra">Pedido extra (opcional)</label><input class="inp" id="an-extra" placeholder="ex.: destacar que é presente de Natal"></div></div>' +
-      '<div class="row between wrap" style="margin-top:6px"><span class="small muted" id="an-info">' + ((p.fotos || []).length ? 'A IA olha até 3 fotos do produto. Cada plataforma escolhida ganha um anúncio novo (ou reescreve o primeiro que já existir).' : 'Sem fotos: a IA usa só os dados do produto.') + '</span>' +
-      '<div class="row" style="gap:6px"><button type="button" class="btn btn-g" id="an-fotos">Baixar fotos</button><button type="button" class="btn btn-p" id="an-gerar">✨ Gerar textos</button></div></div></div></div></div>' +
-      '<div class="row between wrap"><h2 style="margin:0">Anúncios deste produto</h2><div class="row" style="gap:6px"><select class="inp" id="an-novo-pl" aria-label="Plataforma do anúncio novo" style="width:auto">' + platOpts('shopee') + '</select><button type="button" class="btn btn-g" id="an-add">+ Anúncio</button></div></div>' +
+      '<div class="card criar-ad"><div class="row wrap" style="gap:14px;align-items:flex-start">' + ((p.fotos || []).length ? '<div class="an-fotos">' + p.fotos.slice(0, 4).map(function (f) { return thumbHtml(f, p.fotos); }).join('') + '</div>' : '') +
+      '<div class="grow" style="min-width:240px"><h2 style="margin:0 0 4px">➕ Criar anúncio</h2>' +
+      '<div class="lbl" style="margin:10px 0 6px">1. Onde vai anunciar? (pode marcar várias)</div><div class="row wrap" style="gap:6px" id="an-plats">' +
+      visiveis.map(function (pl) { return '<button type="button" class="chip" data-pl="' + pl.id + '">' + esc(pl.nome) + '</button>'; }).join('') +
+      '<a class="small" href="#/anuncios" style="align-self:center;margin-left:4px">outras plataformas…</a></div>' +
+      '<div class="lbl" style="margin:14px 0 6px">2. Crie</div><div class="row wrap" style="gap:8px"><button type="button" class="btn btn-p" id="an-gerar">✨ Criar com IA</button><button type="button" class="btn btn-g" id="an-add">Criar em branco</button><button type="button" class="btn btn-g" id="an-fotos">Baixar fotos</button></div>' +
+      '<details style="margin-top:10px"><summary class="small" style="cursor:pointer">Opções da IA</summary><div class="grid g2" style="margin-top:8px"><div class="field"><label for="an-motor">Quem escreve</label><select class="inp" id="an-motor">' + MOTORES.map(function (x) { return '<option value="' + x.v + '"' + (x.off ? ' disabled' : '') + '>' + esc(x.t) + '</option>'; }).join('') + '</select></div>' +
+      '<div class="field"><label for="an-extra">Pedido extra (opcional)</label><input class="inp" id="an-extra" placeholder="ex.: destacar que é presente de Natal"></div></div></details>' +
+      '<div class="small muted" id="an-info" style="margin-top:8px">' + ((p.fotos || []).length ? 'A IA olha até 3 fotos do produto e cria um anúncio novo para cada plataforma marcada.' : 'Sem fotos: a IA usa só os dados do produto.') + '</div></div></div></div>' +
+      '<div class="row between wrap"><h2 style="margin:0">Anúncios deste produto <span class="muted" id="an-n"></span></h2><div class="row" style="gap:8px" id="an-selbar"></div></div>' +
       '<div id="an-lista" class="stack" style="gap:14px"></div>' +
+      '<div id="an-arq"></div>' +
       '<div class="sticky-save"><a class="btn btn-g" href="#/anuncios">Cancelar</a><button type="button" class="btn btn-p" id="an-salvar">Salvar anúncios</button></div></div>';
 
     function cartao(a, i) {
       var pl = byId(plats, a.plataforma_id) || { id: a.plataforma_id, nome: a.plataforma_id }, lim = LIM_TITULO[pl.id] || 80;
       var sug = precoPlataforma(num(p.preco), pl) || num(p.preco), n = (a.titulo || '').length, mesmo = lista.filter(function (x) { return x.plataforma_id === a.plataforma_id; }).length;
-      return '<div class="card an-card" data-i="' + i + '">' +
-        '<div class="row between wrap" style="gap:8px"><div class="row wrap" style="gap:8px"><select class="inp" data-f="plataforma_id" aria-label="Plataforma" style="width:auto;font-weight:800">' + platOpts(a.plataforma_id) + '</select>' +
+      return '<div class="card an-card' + (selDel[i] ? ' sel' : '') + '" data-i="' + i + '">' +
+        '<div class="row between wrap" style="gap:8px"><div class="row wrap" style="gap:8px"><input type="checkbox" class="an-sel" data-sel' + (selDel[i] ? ' checked' : '') + ' aria-label="Selecionar este anúncio"><select class="inp" data-f="plataforma_id" aria-label="Plataforma" style="width:auto;font-weight:800">' + platOpts(a.plataforma_id) + '</select>' +
         '<input class="inp" data-f="apelido" value="' + esc(a.apelido || '') + '" placeholder="' + (mesmo > 1 ? 'apelido (ex.: kit com 10)' : 'apelido (opcional)') + '" style="width:200px" aria-label="Apelido do anúncio">' +
         (a.gerado_por ? '<span class="small muted">' + esc(a.gerado_por === 'manual' ? 'modelo pronto' : a.gerado_por) + '</span>' : '') + '</div>' +
-        '<div class="row wrap" style="gap:6px"><button type="button" class="btn btn-g btn-s" data-ac="ia" title="Reescrever só este com a IA">✨ Reescrever</button><button type="button" class="btn btn-g btn-s" data-ac="dup">Duplicar</button><button type="button" class="btn btn-g btn-s" data-ac="outro">Copiar para outro produto</button><button type="button" class="icon-btn" data-ac="del" aria-label="Excluir anúncio">' + BTN_DEL + '</button></div></div>' +
+        '<div class="row wrap" style="gap:6px"><button type="button" class="btn btn-g btn-s" data-ac="ia" title="Reescrever só este com a IA">✨ Reescrever</button><button type="button" class="btn btn-g btn-s" data-ac="dup">Duplicar</button><button type="button" class="btn btn-g btn-s" data-ac="outro">Copiar para outro produto</button><button type="button" class="icon-btn" data-ac="del" aria-label="Arquivar anúncio" title="Arquivar (dá para restaurar depois)">' + BTN_DEL + '</button></div></div>' +
         '<div class="grid g4" style="margin-top:10px"><div class="field"><label>Preço nesta plataforma (R$)</label><input class="inp" data-f="preco" inputmode="decimal" value="' + esc(fmtIn(a.preco)) + '" placeholder="' + esc(sug ? fmtIn(sug.toFixed(2)) : '') + '"><div class="hint">' + (sug ? 'sugerido com a taxa: ' + brl(sug) : '') + '</div></div>' +
         '<div class="field" style="grid-column:span 2"><label>Link do anúncio publicado</label><div class="row" style="gap:6px"><input class="inp" data-f="url" value="' + esc(a.url || '') + '" placeholder="cole o link depois de publicar">' + (isUrl(a.url) ? '<a class="btn btn-g btn-s" href="' + esc(a.url) + '" target="_blank" rel="noopener">Abrir ' + ICON.ext + '</a>' : '') + '</div></div>' +
         '<div style="align-self:end"><label class="check"><input type="checkbox" data-f="publicado"' + (a.publicado ? ' checked' : '') + '> Publicado</label></div></div>' +
@@ -2853,10 +2864,14 @@
         '<div class="row wrap" style="gap:6px;justify-content:flex-end"><button type="button" class="btn btn-g" data-cp="tudo">Copiar tudo</button>' + (LINK_ANUNCIAR[pl.id] ? '<a class="btn btn-p" href="' + LINK_ANUNCIAR[pl.id] + '" target="_blank" rel="noopener">Ir anunciar ' + ICON.ext + '</a>' : '') + '</div></div>';
     }
     function draw() {
-      $('#an-lista').innerHTML = lista.length ? lista.map(cartao).join('') : '<div class="card empty">Nenhum anúncio ainda. Escolha as plataformas lá em cima e clique em <b>Gerar textos</b>, ou use <b>+ Anúncio</b>.</div>';
+      $('#an-lista').innerHTML = lista.length ? lista.map(cartao).join('') : '<div class="card empty">Nenhum anúncio ainda. Lá em cima: marque onde vai anunciar e clique em <b>✨ Criar com IA</b>.</div>';
+      var nSel = Object.keys(selDel).filter(function (k) { return selDel[k]; }).length;
+      $('#an-n').textContent = lista.length ? '(' + lista.length + ')' : '';
+      $('#an-selbar').innerHTML = lista.length ? '<label class="check small"><input type="checkbox" id="an-todos"' + (nSel && nSel === lista.length ? ' checked' : '') + '> Selecionar todos</label>' + (nSel ? '<button type="button" class="btn btn-d btn-s" id="an-delsel">Arquivar selecionados (' + nSel + ')</button>' : '') : '';
     }
     draw();
     var L = $('#an-lista');
+    setTimeout(drawArquivo, 0);
     L.addEventListener('input', function (e) {
       var c = e.target.closest('[data-i]'), k = e.target.dataset.f; if (!c || !k) return;
       var a = lista[+c.dataset.i]; dirty = true;
@@ -2865,6 +2880,7 @@
       if (k === 'titulo') { var lim = LIM_TITULO[a.plataforma_id] || 80, n = e.target.value.length, el = $('[data-cont]', c); el.textContent = n + '/' + lim; el.className = 'small ' + (n > lim ? 'bad-t' : 'muted'); }
     });
     L.addEventListener('change', function (e) {
+      if (e.target.matches('[data-sel]')) { var ci = +e.target.closest('[data-i]').dataset.i; selDel[ci] = e.target.checked; draw(); return; }
       var c = e.target.closest('[data-i]'), k = e.target.dataset.f; if (!c || !k) return;
       var a = lista[+c.dataset.i]; dirty = true;
       if (k === 'publicado') a.publicado = e.target.checked;
@@ -2876,8 +2892,8 @@
       var i = +c.dataset.i, a = lista[i];
       var cp = e.target.closest('[data-cp]'); if (cp) return copiarTexto(textoDoAd(a, cp.dataset.cp));
       var ac = e.target.closest('[data-ac]'); if (!ac) return;
-      if (ac.dataset.ac === 'dup') { var d = novoAd(p.id, a.plataforma_id, a); d.apelido = (a.apelido ? a.apelido + ' ' : '') + '(cópia)'; lista.splice(i + 1, 0, d); dirty = true; draw(); toast('Anúncio duplicado — mude o que quiser e salve'); var el = $('[data-i="' + (i + 1) + '"]'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
-      if (ac.dataset.ac === 'del') { if (!(await confirmar('Excluir este anúncio?', 'Apaga o texto e o link guardados aqui (o anúncio na plataforma não é afetado).', 'Excluir', true))) return; if (!a._novo) removidos.push(a.id); lista.splice(i, 1); dirty = true; draw(); }
+      if (ac.dataset.ac === 'dup') { selDel = {}; var d = novoAd(p.id, a.plataforma_id, a); d.apelido = (a.apelido ? a.apelido + ' ' : '') + '(cópia)'; lista.splice(i + 1, 0, d); dirty = true; draw(); toast('Anúncio duplicado — mude o que quiser e salve'); var el = $('[data-i="' + (i + 1) + '"]'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      if (ac.dataset.ac === 'del') { if (a._novo) { lista.splice(i, 1); selDel = {}; return draw(); } try { await arquivarAds([a.id]); } catch (x) { return; } lista.splice(i, 1); selDel = {}; draw(); drawArquivo(); }
       if (ac.dataset.ac === 'outro') copiarParaOutro(a);
       if (ac.dataset.ac === 'ia') gerar([a], ac);
     });
@@ -2897,7 +2913,63 @@
         } catch (err) { toast(erroMsg(err), true); }
       });
     }
-    $('#an-add').addEventListener('click', function () { lista.push(novoAd(p.id, $('#an-novo-pl').value)); dirty = true; draw(); var el = $('[data-i="' + (lista.length - 1) + '"]'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+    async function arquivarAds(ids) {
+      ids = ids.filter(Boolean); if (!ids.length) return;
+      if (S.falta11) { toast('Para arquivar, rode o script 11 no Supabase', true); throw new Error('falta 11'); }
+      var agora = new Date().toISOString();
+      try {
+        q(await sb.from('produto_anuncios').update({ arquivado: true, arquivado_em: agora }).in('id', ids));
+        S.anuncios.forEach(function (x) { if (ids.indexOf(x.id) >= 0) { x.arquivado = true; x.arquivado_em = agora; } });
+        toast(ids.length > 1 ? ids.length + ' anúncios arquivados' : 'Anúncio arquivado (está lá embaixo, em Arquivados)');
+      } catch (err) { toast(erroMsg(err), true); throw err; }
+    }
+    var selArq = {};
+    function drawArquivo() {
+      var arq = arquivadosDe(p.id), box = $('#an-arq'); if (!box) return;
+      var nSel = arq.filter(function (a) { return selArq[a.id]; }).length;
+      box.innerHTML = arq.length ? '<details class="card" id="an-arq-d"' + (box.dataset.aberto ? ' open' : '') + '><summary style="cursor:pointer;font-weight:800">🗄️ Arquivados (' + arq.length + ')</summary>' +
+        '<div class="row between wrap" style="margin:10px 0"><label class="check small"><input type="checkbox" id="arq-todos"' + (nSel && nSel === arq.length ? ' checked' : '') + '> Selecionar todos</label>' + (nSel ? '<button type="button" class="btn btn-d btn-s" id="arq-delsel">Excluir para sempre (' + nSel + ')</button>' : '') + '</div>' +
+        '<div class="stack" style="gap:8px">' + arq.map(function (a) {
+          var pl = byId(S.plataformas, a.plataforma_id) || { nome: a.plataforma_id };
+          return '<div class="row between wrap arq-row" data-arq="' + a.id + '" style="gap:8px;border-top:1px solid var(--line);padding-top:8px"><div class="row" style="gap:10px"><input type="checkbox" class="an-sel" data-arq-sel' + (selArq[a.id] ? ' checked' : '') + ' aria-label="Selecionar"><div><b>' + esc(pl.nome) + '</b>' + (a.apelido ? ' · ' + esc(a.apelido) : '') + '<div class="small muted">' + esc((a.titulo || 'sem título').slice(0, 90)) + (a.arquivado_em ? ' · arquivado em ' + dataBR(a.arquivado_em) : '') + '</div></div></div>' +
+            '<div class="row" style="gap:6px"><button type="button" class="btn btn-g btn-s" data-arq-ac="rest">Restaurar</button><button type="button" class="btn btn-d btn-s" data-arq-ac="del">Excluir para sempre</button></div></div>';
+        }).join('') + '</div></details>' : '';
+    }
+    $('#an-arq').addEventListener('toggle', function (e) { if (e.target.id === 'an-arq-d') $('#an-arq').dataset.aberto = e.target.open ? '1' : ''; }, true);
+    $('#an-arq').addEventListener('change', function (e) {
+      if (e.target.id === 'arq-todos') { selArq = {}; if (e.target.checked) arquivadosDe(p.id).forEach(function (a) { selArq[a.id] = true; }); return drawArquivo(); }
+      if (e.target.matches('[data-arq-sel]')) { selArq[e.target.closest('[data-arq]').dataset.arq] = e.target.checked; drawArquivo(); }
+    });
+    async function excluirDeVez(ids) {
+      if (!(await confirmar('Excluir para sempre?', ids.length + ' anúncio(s) arquivado(s) serão apagados de vez, sem volta.', 'Excluir para sempre', true))) return;
+      try { q(await sb.from('produto_anuncios').delete().in('id', ids)); S.anuncios = S.anuncios.filter(function (x) { return ids.indexOf(x.id) < 0; }); selArq = {}; toast('Excluído para sempre'); drawArquivo(); }
+      catch (err) { toast(erroMsg(err), true); }
+    }
+    $('#an-arq').addEventListener('click', async function (e) {
+      if (e.target.id === 'arq-delsel') return excluirDeVez(Object.keys(selArq).filter(function (k) { return selArq[k]; }));
+      var b = e.target.closest('[data-arq-ac]'); if (!b) return;
+      var id = b.closest('[data-arq]').dataset.arq;
+      if (b.dataset.arqAc === 'del') return excluirDeVez([id]);
+      try {
+        q(await sb.from('produto_anuncios').update({ arquivado: false, arquivado_em: null }).eq('id', id));
+        var a0 = byId(S.anuncios, id); a0.arquivado = false; a0.arquivado_em = null;
+        lista.push(JSON.parse(JSON.stringify(a0))); selDel = {}; draw(); drawArquivo(); toast('Anúncio restaurado ✓');
+      } catch (err) { toast(erroMsg(err), true); }
+    });
+    $('#an-selbar').addEventListener('change', function (e) { if (e.target.id === 'an-todos') { selDel = {}; if (e.target.checked) lista.forEach(function (_, i) { selDel[i] = true; }); draw(); } });
+    $('#an-selbar').addEventListener('click', async function (e) {
+      if (e.target.id !== 'an-delsel') return;
+      var idx = Object.keys(selDel).filter(function (k) { return selDel[k]; }).map(Number);
+      if (!(await confirmar('Arquivar ' + idx.length + ' anúncio(s)?', 'Eles saem da lista e vão para Arquivados, lá embaixo. Dá para restaurar ou excluir para sempre depois. Os anúncios que já estão no ar nas plataformas não são afetados.', 'Arquivar'))) return;
+      try { await arquivarAds(idx.map(function (i) { return lista[i]._novo ? null : lista[i].id; })); } catch (x) { return; }
+      lista = lista.filter(function (_, i) { return !selDel[i]; }); selDel = {}; draw(); drawArquivo();
+    });
+    function escolhidas() { return plats.filter(function (pl) { return marcadas[pl.id]; }); }
+    $('#an-add').addEventListener('click', function () {
+      var esc2 = escolhidas(); if (!esc2.length) return toast('Marque primeiro onde vai anunciar (passo 1)', true);
+      esc2.forEach(function (pl) { lista.push(novoAd(p.id, pl.id)); }); dirty = true; draw();
+      var el = $('[data-i="' + (lista.length - esc2.length) + '"]'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
     $('#an-plats').addEventListener('click', function (e) { var b = e.target.closest('[data-pl]'); if (!b) return; marcadas[b.dataset.pl] = !marcadas[b.dataset.pl]; b.classList.toggle('on', marcadas[b.dataset.pl]); });
 
     // gerar: alvos = anúncios que recebem o texto (um por plataforma)
@@ -2921,18 +2993,15 @@
         alvos.forEach(function (a) { delete a._feito; });
         dirty = true; draw();
         $('#an-info').textContent = n + ' anúncio(s) prontos · ' + (d.modelo || 'Gemini') + (d.fotos ? ' · olhou ' + d.fotos + ' foto(s)' : '') + '. Revise e clique em Salvar anúncios.';
-      } catch (err) { $('#an-info').textContent = ''; toast(err.message, true); }
+      } catch (err) { $('#an-info').textContent = ''; toast(err.message, true); lista = lista.filter(function (x) { return !(x._novo && !x.titulo && !x.descricao && alvos.indexOf(x) >= 0); }); draw(); }
       btn.disabled = false; btn.innerHTML = txt;
+      var el0 = $('[data-i="' + lista.indexOf(alvos[0]) + '"]'); if (el0 && alvos[0].titulo) el0.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     $('#an-gerar').addEventListener('click', function () {
-      var escolha = plats.filter(function (pl) { return marcadas[pl.id]; });
-      if (!escolha.length) return toast('Escolha ao menos uma plataforma', true);
-      var alvos = escolha.map(function (pl) {
-        var a = lista.filter(function (x) { return x.plataforma_id === pl.id; })[0];
-        if (!a) { a = novoAd(p.id, pl.id); lista.push(a); }
-        return a;
-      });
-      gerar(alvos, this);
+      var escolha = escolhidas();
+      if (!escolha.length) return toast('Marque primeiro onde vai anunciar (passo 1)', true);
+      var alvos = escolha.map(function (pl) { var a = novoAd(p.id, pl.id); lista.push(a); return a; });
+      draw(); gerar(alvos, this);
     });
     $('#an-fotos').addEventListener('click', async function () {
       var fs = (p.fotos || []).filter(isUrl); if (!fs.length) return toast('Este produto não tem fotos', true);
@@ -2953,7 +3022,7 @@
       try {
         if (removidos.length) q(await sb.from('produto_anuncios').delete().in('id', removidos));
         var salvos = rows.length ? q(await sb.from('produto_anuncios').upsert(rows).select()) : [];
-        S.anuncios = S.anuncios.filter(function (x) { return x.produto_id !== p.id; }).concat(salvos || rows);
+        S.anuncios = S.anuncios.filter(function (x) { return x.produto_id !== p.id || x.arquivado; }).concat(salvos || rows);
         dirty = false; toast('Anúncios salvos ✓'); render();
       } catch (err) { toast('Não salvou: ' + erroMsg(err), true); }
       btn.disabled = false;
@@ -2963,13 +3032,13 @@
   // ------------------------------------------------------------------ tela Anúncios
   function telaAnuncios(v) {
     setHeader('Anúncios com IA', '<a class="btn btn-g" href="#/shopee">📦 <span class="long">Planilha da Shopee</span></a>');
-    var plats = platsAnuncio().filter(function (pl) { return pl.id !== 'site'; });
+    var todas = platsAnuncio().filter(function (pl) { return pl.id !== 'site'; }), plats = platsVisiveis();
     var busca = S.ui.busca.anuncios || '', falta = S.ui.anFalta || '';
     var lista = S.produtos.filter(function (p) { return p.ativo; }).filter(function (p) {
-      if (falta && S.anuncios.some(function (a) { return a.produto_id === p.id && a.plataforma_id === falta && (a.publicado || a.url); })) return false;
+      if (falta && S.anuncios.some(function (a) { return a.produto_id === p.id && a.plataforma_id === falta && !a.arquivado && (a.publicado || a.url); })) return false;
       return combina([p.nome, p.categoria, p.material], busca);
     }).sort(function (a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); });
-    var est = function (p, pl) { var l = S.anuncios.filter(function (a) { return a.produto_id === p.id && a.plataforma_id === pl.id; }); if (l.some(function (a) { return a.publicado || isUrl(a.url); })) return 'pub'; if (l.some(function (a) { return a.titulo; })) return 'txt'; return ''; };
+    var est = function (p, pl) { var l = S.anuncios.filter(function (a) { return a.produto_id === p.id && a.plataforma_id === pl.id && !a.arquivado; }); if (l.some(function (a) { return a.publicado || isUrl(a.url); })) return 'pub'; if (l.some(function (a) { return a.titulo; })) return 'txt'; return ''; };
     var nPub = 0, nTxt = 0;
     S.produtos.filter(function (p) { return p.ativo; }).forEach(function (p) { plats.forEach(function (pl) { var e = est(p, pl); if (e === 'pub') nPub++; else if (e === 'txt') nTxt++; }); });
     v.innerHTML = '<div class="stack">' +
@@ -2977,17 +3046,22 @@
       '<div class="grid g3">' + kpi('Anúncios publicados', nPub, 'com link ou marcados como publicados') + kpi('Textos prontos', nTxt, 'gerados, ainda não publicados') + kpi('Produtos ativos', S.produtos.filter(function (p) { return p.ativo; }).length, plats.length + ' plataformas ativas') + '</div>' +
       '<div class="row between wrap">' + buscaHtml('anuncios', 'Pesquisar produto…') +
       '<div class="field" style="min-width:220px"><select class="inp" id="an-falta" aria-label="Filtrar"><option value="">Todos os produtos</option>' + plats.map(function (pl) { return '<option value="' + pl.id + '"' + (pl.id === falta ? ' selected' : '') + '>Ainda não publicados no ' + esc(pl.nome) + '</option>'; }).join('') + '</select></div></div>' +
+      '<div class="card" style="padding:12px 14px"><div class="row wrap" style="gap:6px;align-items:center"><span class="lbl" style="margin-right:4px">Plataformas que vocês usam</span>' + todas.map(function (pl) { return '<button type="button" class="chip' + (byId(plats, pl.id) ? ' on' : '') + '" data-ver="' + pl.id + '">' + (byId(plats, pl.id) ? '✓ ' : '') + esc(pl.nome) + '</button>'; }).join('') + '</div><div class="hint" style="margin-top:6px">Só as marcadas aparecem aqui e na hora de criar anúncios. Vale para este aparelho.</div></div>' +
       '<div class="small muted row wrap" style="gap:12px"><span><i class="an-dot pub"></i> publicado</span><span><i class="an-dot txt"></i> texto pronto</span><span><i class="an-dot"></i> nada ainda</span></div>' +
       (lista.length ? '<div class="card" style="padding:0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th style="width:58px"></th><th>Produto</th>' + plats.map(function (pl) { return '<th class="hide-m" style="text-align:center">' + esc(pl.nome) + '</th>'; }).join('') + '<th></th></tr></thead><tbody>' +
         lista.map(function (p) {
           return '<tr><td>' + thumbHtml(p.fotos && p.fotos[0], p.fotos) + '</td><td><div style="font-weight:700">' + esc(p.nome) + '</div><div class="small muted">' + esc([p.categoria, p.preco ? brl(num(p.preco)) : ''].filter(Boolean).join(' · ')) + '</div>' +
             '<div class="show-m an-mini">' + plats.map(function (pl) { return '<span title="' + esc(pl.nome) + '"><i class="an-dot ' + est(p, pl) + '"></i>' + esc(pl.nome.split(' ')[0]) + '</span>'; }).join('') + '</div></td>' +
             plats.map(function (pl) { return '<td class="hide-m" style="text-align:center"><i class="an-dot ' + est(p, pl) + '" title="' + esc(pl.nome) + '"></i></td>'; }).join('') +
-            '<td class="num"><button class="btn btn-p btn-s" data-an="' + p.id + '">✨ <span class="long">Anúncios</span></button></td></tr>';
+            '<td class="num"><button class="btn btn-p btn-s" data-an="' + p.id + '">✨ <span class="long">Criar / ver anúncios</span><span class="show-m">Anúncios</span></button></td></tr>';
         }).join('') + '</tbody></table></div></div>' : (busca ? nadaAchado('anuncios') : '<div class="card empty">Nenhum produto aqui. 🎉</div>'));
     ligarBusca('anuncios');
     $('#an-falta').addEventListener('change', function (e) { S.ui.anFalta = e.target.value; render(); });
-    v.onclick = function (e) { var b = e.target.closest('[data-an]'); if (b) go('#/anuncio/' + b.dataset.an); };
+    v.onclick = function (e) {
+      var c = e.target.closest('[data-ver]');
+      if (c) { var ids = plats.map(function (x) { return x.id; }), id = c.dataset.ver, k = ids.indexOf(id); if (k >= 0) { if (ids.length === 1) return toast('Deixe pelo menos uma', true); ids.splice(k, 1); } else ids.push(id); guardarPlatsVer(ids); return render(); }
+      var b = e.target.closest('[data-an]'); if (b) go('#/anuncio/' + b.dataset.an);
+    };
   }
 
   // ------------------------------------------------------------------ configurações da IA
@@ -3110,7 +3184,7 @@
     var opc = S.ui.shopeeOpc || (S.ui.shopeeOpc = { estoqueEnc: 10, prazo: '', embalagem: 0, correios: true, soNovos: true });
     var marc = S.ui.shopeeMarc || (S.ui.shopeeMarc = {});
     var modeloBuf = S.ui.shopeeModelo || null;
-    var ads = S.anuncios.filter(function (a) { var p = byId(S.produtos, a.produto_id); return a.plataforma_id === 'shopee' && p && p.ativo && (!opc.soNovos || !(a.publicado || isUrl(a.url))); })
+    var ads = S.anuncios.filter(function (a) { var p = byId(S.produtos, a.produto_id); return a.plataforma_id === 'shopee' && !a.arquivado && p && p.ativo && (!opc.soNovos || !(a.publicado || isUrl(a.url))); })
       .sort(function (a, b) { return nomeProduto(a.produto_id).localeCompare(nomeProduto(b.produto_id), 'pt-BR'); });
     var capas = {};
     ads.forEach(function (a) { var p = byId(S.produtos, a.produto_id); var c = (p.fotos || [])[0]; if (c) capas[c] = (capas[c] || 0) + 1; });
