@@ -2708,7 +2708,7 @@
     facebook: 'Facebook Marketplace: mesmos blocos do ANÚNCIO MODELO, tom conversado e próximo. Troque o bloco de envio por retirada e entrega em Curitiba (dados de CONTATO) e termine chamando no WhatsApp. Pode citar o preço.',
     olx: 'OLX: título objetivo (o que é + destaque). Mesmos blocos do ANÚNCIO MODELO de forma enxuta; troque o bloco de envio por retirada e entrega em Curitiba e WhatsApp (dados de CONTATO). Pode citar o preço.',
     instagram: 'Instagram: legenda de post/reels. Primeira linha que prende a atenção, 2 a 4 tópicos curtos com emojis tirados dos DESTAQUES, chamada para chamar no direct ou WhatsApp, e de 8 a 15 hashtags em português no campo palavras_chave (sem #). O título é só uma frase curta de capa.',
-    site: 'Site / WhatsApp: mesmos blocos do ANÚNCIO MODELO, tom amigável; troque o envio por retirada/entrega em Curitiba e WhatsApp.'
+    site: 'Site e WhatsApp: este texto vira a descrição do produto no nosso site e também é mandado no WhatsApp. Use os mesmos blocos do ANÚNCIO MODELO, tom amigável, SEM repetir o preço na descrição. No lugar do bloco de envio, diga que dá para retirar em Curitiba ou receber por entrega/envio, e termine convidando a chamar no WhatsApp (sem escrever o número).'
   };
   function montarPrompt(p, plats, extra) {
     var cfg = S.cfg || {};
@@ -2842,7 +2842,7 @@
       '<details style="margin-top:10px"><summary class="small" style="cursor:pointer">Opções da IA</summary><div class="grid g2" style="margin-top:8px"><div class="field"><label for="an-motor">Quem escreve</label><select class="inp" id="an-motor">' + MOTORES.map(function (x) { return '<option value="' + x.v + '"' + (x.off ? ' disabled' : '') + '>' + esc(x.t) + '</option>'; }).join('') + '</select></div>' +
       '<div class="field"><label for="an-extra">Pedido extra (opcional)</label><input class="inp" id="an-extra" placeholder="ex.: destacar que é presente de Natal"></div></div></details>' +
       '<div class="small muted" id="an-info" style="margin-top:8px">' + ((p.fotos || []).length ? 'A IA olha até 3 fotos do produto e cria um anúncio novo para cada plataforma marcada.' : 'Sem fotos: a IA usa só os dados do produto.') + '</div></div></div></div>' +
-      '<div class="card note row between wrap" style="gap:8px"><span>🌐 <b>Nosso site é automático:</b> ' + (p.ativo && p.mostrar_no_site ? 'este produto <b>já está no site</b>, com as fotos, o preço e a descrição do cadastro do produto.' : 'este produto <b>não está no site</b>. Para colocar, marque “Mostrar no site” no produto.') + ' O anúncio “Site e WhatsApp” aqui é só um texto pronto para mandar no WhatsApp.</span><span class="row" style="gap:6px">' + (p.ativo && p.mostrar_no_site ? '<a class="btn btn-g btn-s" target="_blank" rel="noopener" href="' + esc(((window.CRISTART_CONFIG || {}).siteUrl || 'https://www.cristart3d.com.br/') + '#/produto/' + encodeURIComponent(p.codigo_site || p.id)) + '">Ver no site ' + ICON.ext + '</a>' : '') + '<a class="btn btn-g btn-s" href="#/produto/' + p.id + '">Abrir produto</a></span></div>' +
+      '<div class="card note row between wrap" style="gap:8px"><span>🌐 <b>Nosso site é automático:</b> ' + (p.ativo && p.mostrar_no_site ? 'este produto <b>já está no site</b>, com as fotos, o preço e a descrição do cadastro do produto.' : 'este produto <b>não está no site</b>. Para colocar, marque “Mostrar no site” no produto.') + ' Se criar o anúncio “Site e WhatsApp”, ao salvar o texto dele vira a descrição do produto no site (e serve para mandar no WhatsApp).</span><span class="row" style="gap:6px">' + (p.ativo && p.mostrar_no_site ? '<a class="btn btn-g btn-s" target="_blank" rel="noopener" href="' + esc(((window.CRISTART_CONFIG || {}).siteUrl || 'https://www.cristart3d.com.br/') + '#/produto/' + encodeURIComponent(p.codigo_site || p.id)) + '">Ver no site ' + ICON.ext + '</a>' : '') + '<a class="btn btn-g btn-s" href="#/produto/' + p.id + '">Abrir produto</a></span></div>' +
       '<div class="row between wrap"><h2 style="margin:0">Anúncios deste produto <span class="muted" id="an-n"></span></h2><div class="row" style="gap:8px" id="an-selbar"></div></div>' +
       '<div id="an-lista" class="stack" style="gap:14px"></div>' +
       '<div id="an-arq"></div>' +
@@ -3024,7 +3024,17 @@
         if (removidos.length) q(await sb.from('produto_anuncios').delete().in('id', removidos));
         var salvos = rows.length ? q(await sb.from('produto_anuncios').upsert(rows).select()) : [];
         S.anuncios = S.anuncios.filter(function (x) { return x.produto_id !== p.id || x.arquivado; }).concat(salvos || rows);
-        dirty = false; toast('Anúncios salvos ✓'); render();
+        // o texto "Site e WhatsApp" vira a descrição do produto no site
+        var adSite = (salvos || rows).filter(function (r) { return r.plataforma_id === 'site' && r.descricao; })[0];
+        var msg = 'Anúncios salvos ✓';
+        if (adSite && adSite.descricao !== p.descricao) {
+          var patch = { descricao: adSite.descricao };
+          if (!p.descricao_breve && adSite.titulo) patch.descricao_breve = adSite.titulo;
+          var pr = q(await sb.from('produtos').update(patch).eq('id', p.id).select().single());
+          S.produtos = S.produtos.map(function (x) { return x.id === pr.id ? pr : x; });
+          msg = 'Anúncios salvos ✓ e o texto do site foi atualizado';
+        }
+        dirty = false; toast(msg); render();
       } catch (err) { toast('Não salvou: ' + erroMsg(err), true); }
       btn.disabled = false;
     });
