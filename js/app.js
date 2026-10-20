@@ -2680,7 +2680,7 @@
   // ================================================================== ANÚNCIOS COM IA (etapa 3)
   var LIM_TITULO = { ml: 60, shopee: 100, tiktok: 100, olx: 70, facebook: 80, instagram: 60, site: 80 };
   var LINK_ANUNCIAR = {
-    shopee: 'https://seller.shopee.com.br/portal/product/new', ml: 'https://www.mercadolivre.com.br/anunciar',
+    site: 'https://web.whatsapp.com/', shopee: 'https://seller.shopee.com.br/portal/product/new', ml: 'https://www.mercadolivre.com.br/anunciar',
     tiktok: 'https://seller-br.tiktok.com/', facebook: 'https://www.facebook.com/marketplace/create/item',
     olx: 'https://www.olx.com.br/', instagram: 'https://www.instagram.com/'
   };
@@ -2689,9 +2689,9 @@
     { v: 'haiku', t: 'Claude Haiku — em breve', off: true }, { v: 'sonnet', t: 'Claude Sonnet — em breve', off: true }, { v: 'gpt', t: 'ChatGPT — em breve', off: true }
   ];
   function falta08() { return !S.cfg || !('regras_anuncio' in S.cfg); }
-  function platsAnuncio() { return S.plataformas.filter(function (pl) { return pl.ativa; }); }
+  function platsAnuncio() { return S.plataformas.filter(function (pl) { return pl.ativa; }).map(function (pl) { return pl.id === 'site' ? Object.assign({}, pl, { nome: 'Site e WhatsApp' }) : pl; }); }
   function platsVerIds() { try { var v = JSON.parse(localStorage.getItem('cristart_plats_ver') || 'null'); return Array.isArray(v) ? v : null; } catch (e) { return null; } }
-  function platsVisiveis() { var ids = S.ui.platsVer || platsVerIds(); var l = platsAnuncio().filter(function (pl) { return pl.id !== 'site'; }); return ids ? l.filter(function (pl) { return ids.indexOf(pl.id) >= 0; }) : l; }
+  function platsVisiveis() { var ids = S.ui.platsVer || platsVerIds(); var l = platsAnuncio(); return ids ? l.filter(function (pl) { return ids.indexOf(pl.id) >= 0; }) : l; }
   function guardarPlatsVer(ids) { S.ui.platsVer = ids; try { localStorage.setItem('cristart_plats_ver', JSON.stringify(ids)); } catch (e) { } }
   function adDe(pid, pl) { return S.anuncios.filter(function (a) { return a.produto_id === pid && a.plataforma_id === pl && !a.arquivado; })[0] || null; }
   function precoNa(p, pl) { var a = adDe(p.id, pl.id); if (a && num(a.preco)) return num(a.preco); var v = precoPlataforma(num(p.preco), pl); return v || num(p.preco) || null; }
@@ -2842,6 +2842,7 @@
       '<details style="margin-top:10px"><summary class="small" style="cursor:pointer">Opções da IA</summary><div class="grid g2" style="margin-top:8px"><div class="field"><label for="an-motor">Quem escreve</label><select class="inp" id="an-motor">' + MOTORES.map(function (x) { return '<option value="' + x.v + '"' + (x.off ? ' disabled' : '') + '>' + esc(x.t) + '</option>'; }).join('') + '</select></div>' +
       '<div class="field"><label for="an-extra">Pedido extra (opcional)</label><input class="inp" id="an-extra" placeholder="ex.: destacar que é presente de Natal"></div></div></details>' +
       '<div class="small muted" id="an-info" style="margin-top:8px">' + ((p.fotos || []).length ? 'A IA olha até 3 fotos do produto e cria um anúncio novo para cada plataforma marcada.' : 'Sem fotos: a IA usa só os dados do produto.') + '</div></div></div></div>' +
+      '<div class="card note row between wrap" style="gap:8px"><span>🌐 <b>Nosso site é automático:</b> ' + (p.ativo && p.mostrar_no_site ? 'este produto <b>já está no site</b>, com as fotos, o preço e a descrição do cadastro do produto.' : 'este produto <b>não está no site</b>. Para colocar, marque “Mostrar no site” no produto.') + ' O anúncio “Site e WhatsApp” aqui é só um texto pronto para mandar no WhatsApp.</span><span class="row" style="gap:6px">' + (p.ativo && p.mostrar_no_site ? '<a class="btn btn-g btn-s" target="_blank" rel="noopener" href="' + esc(((window.CRISTART_CONFIG || {}).siteUrl || 'https://www.cristart3d.com.br/') + '#/produto/' + encodeURIComponent(p.codigo_site || p.id)) + '">Ver no site ' + ICON.ext + '</a>' : '') + '<a class="btn btn-g btn-s" href="#/produto/' + p.id + '">Abrir produto</a></span></div>' +
       '<div class="row between wrap"><h2 style="margin:0">Anúncios deste produto <span class="muted" id="an-n"></span></h2><div class="row" style="gap:8px" id="an-selbar"></div></div>' +
       '<div id="an-lista" class="stack" style="gap:14px"></div>' +
       '<div id="an-arq"></div>' +
@@ -3032,13 +3033,13 @@
   // ------------------------------------------------------------------ tela Anúncios
   function telaAnuncios(v) {
     setHeader('Anúncios com IA', '<a class="btn btn-g" href="#/shopee">📦 <span class="long">Planilha da Shopee</span></a>');
-    var todas = platsAnuncio().filter(function (pl) { return pl.id !== 'site'; }), plats = platsVisiveis();
+    var todas = platsAnuncio(), plats = platsVisiveis();
     var busca = S.ui.busca.anuncios || '', falta = S.ui.anFalta || '';
     var lista = S.produtos.filter(function (p) { return p.ativo; }).filter(function (p) {
       if (falta && S.anuncios.some(function (a) { return a.produto_id === p.id && a.plataforma_id === falta && !a.arquivado && (a.publicado || a.url); })) return false;
       return combina([p.nome, p.categoria, p.material], busca);
     }).sort(function (a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); });
-    var est = function (p, pl) { var l = S.anuncios.filter(function (a) { return a.produto_id === p.id && a.plataforma_id === pl.id && !a.arquivado; }); if (l.some(function (a) { return a.publicado || isUrl(a.url); })) return 'pub'; if (l.some(function (a) { return a.titulo; })) return 'txt'; return ''; };
+    var est = function (p, pl) { if (pl.id === 'site') return p.mostrar_no_site ? 'pub' : ''; var l = S.anuncios.filter(function (a) { return a.produto_id === p.id && a.plataforma_id === pl.id && !a.arquivado; }); if (l.some(function (a) { return a.publicado || isUrl(a.url); })) return 'pub'; if (l.some(function (a) { return a.titulo; })) return 'txt'; return ''; };
     var nPub = 0, nTxt = 0;
     S.produtos.filter(function (p) { return p.ativo; }).forEach(function (p) { plats.forEach(function (pl) { var e = est(p, pl); if (e === 'pub') nPub++; else if (e === 'txt') nTxt++; }); });
     v.innerHTML = '<div class="stack">' +
