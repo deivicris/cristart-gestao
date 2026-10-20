@@ -3249,14 +3249,14 @@
 
   // ================================================================== FOTOS COM IA (Nano Banana)
   var MODOS_FOTO = [
-    { v: 'branco', t: '⚪ Fundo branco', d: 'Capa para Shopee e Mercado Livre', p: 'Place the product on a pure white seamless background (#FFFFFF), centered, filling about 85% of the frame, with a soft natural contact shadow. No props, no text, no logos, no other objects.' },
-    { v: 'ambiente', t: '🏠 Ambiente', d: 'Num lugar que combina com o produto', p: 'Place the product in a realistic, attractive real-life setting where it would naturally be used, styled like a lifestyle catalog photo. The product must be the clear hero of the image, in sharp focus, with the background slightly blurred.' },
-    { v: 'uso', t: '🙌 Em uso', d: 'Alguém usando, mostra o tamanho', p: 'Show the product being used naturally by a person (hands or a person in the scene, face not the focus), so the buyer understands how it is used and its real size. Candid lifestyle photo, warm and inviting.' },
-    { v: 'tema', t: '🎄 Data / tema', d: 'Natal, Dia das Crianças, festa…', p: 'Create a festive seasonal scene for the theme described below, with decorative elements around the product that match the theme. Vibrant, joyful, eye-catching colors, but keep it realistic and keep the product clearly visible and unchanged.' },
-    { v: 'cartaz', t: '📰 Cartaz / banner', d: 'Com frase e cara de propaganda', p: 'Create an eye-catching advertising poster / banner featuring the product, with a bold modern layout, vibrant colors and the headline text given below written exactly as provided, in Brazilian Portuguese, large and perfectly legible. Leave clean space around the text.' },
-    { v: 'detalhe', t: '🔍 Detalhe', d: 'Close mostrando acabamento', p: 'Create a close-up macro product shot highlighting the details, texture and finish of the product, shallow depth of field, studio lighting.' },
-    { v: 'kit', t: '🎁 Kit / presente', d: 'Embalado para presente ou em conjunto', p: 'Present the product as a lovely gift: arranged with simple gift packaging (kraft box, ribbon, tissue paper) in a clean, cozy setting, suggesting it is a great present.' },
-    { v: 'livre', t: '✍️ Do meu jeito', d: 'Você descreve tudo', p: '' }
+    { v: 'branco', pt: 'Coloque o produto sobre um fundo branco puro (#FFFFFF), centralizado, ocupando uns 85% da imagem, com uma sombra suave e natural. Sem objetos, sem texto, sem logos.', t: '⚪ Fundo branco', d: 'Capa para Shopee e Mercado Livre', p: 'Place the product on a pure white seamless background (#FFFFFF), centered, filling about 85% of the frame, with a soft natural contact shadow. No props, no text, no logos, no other objects.' },
+    { v: 'ambiente', pt: 'Coloque o produto num ambiente real e bonito onde ele seria usado, como uma foto de catálogo. O produto é o destaque: bem nítido, com o fundo levemente desfocado.', t: '🏠 Ambiente', d: 'Num lugar que combina com o produto', p: 'Place the product in a realistic, attractive real-life setting where it would naturally be used, styled like a lifestyle catalog photo. The product must be the clear hero of the image, in sharp focus, with the background slightly blurred.' },
+    { v: 'uso', pt: 'Mostre o produto sendo usado naturalmente por uma pessoa (mãos ou alguém na cena, sem foco no rosto), para o cliente entender como se usa e o tamanho real. Foto espontânea, acolhedora.', t: '🙌 Em uso', d: 'Alguém usando, mostra o tamanho', p: 'Show the product being used naturally by a person (hands or a person in the scene, face not the focus), so the buyer understands how it is used and its real size. Candid lifestyle photo, warm and inviting.' },
+    { v: 'tema', pt: 'Crie uma cena comemorativa com o tema descrito abaixo, com enfeites em volta do produto que combinem com o tema. Cores vibrantes e alegres, mas realista, com o produto bem visível e sem alterações.', t: '🎄 Data / tema', d: 'Natal, Dia das Crianças, festa…', p: 'Create a festive seasonal scene for the theme described below, with decorative elements around the product that match the theme. Vibrant, joyful, eye-catching colors, but keep it realistic and keep the product clearly visible and unchanged.' },
+    { v: 'cartaz', pt: 'Crie um cartaz/banner de propaganda chamativo com o produto, layout moderno, cores vibrantes e a frase abaixo escrita exatamente como está, em português, grande e bem legível, com espaço limpo em volta do texto.', t: '📰 Cartaz / banner', d: 'Com frase e cara de propaganda', p: 'Create an eye-catching advertising poster / banner featuring the product, with a bold modern layout, vibrant colors and the headline text given below written exactly as provided, in Brazilian Portuguese, large and perfectly legible. Leave clean space around the text.' },
+    { v: 'detalhe', pt: 'Faça uma foto em close (macro) destacando os detalhes, a textura e o acabamento do produto, fundo desfocado, luz de estúdio.', t: '🔍 Detalhe', d: 'Close mostrando acabamento', p: 'Create a close-up macro product shot highlighting the details, texture and finish of the product, shallow depth of field, studio lighting.' },
+    { v: 'kit', pt: 'Apresente o produto como um presente: com embalagem simples (caixa kraft, fita, papel de seda) num cenário limpo e aconchegante, sugerindo que é um ótimo presente.', t: '🎁 Kit / presente', d: 'Embalado para presente ou em conjunto', p: 'Present the product as a lovely gift: arranged with simple gift packaging (kraft box, ribbon, tissue paper) in a clean, cozy setting, suggesting it is a great present.' },
+    { v: 'livre', pt: '', t: '✍️ Do meu jeito', d: 'Você descreve tudo', p: '' }
   ];
   var PROPORCOES = [{ v: '1:1', t: 'Quadrada 1:1 (marketplaces)' }, { v: '4:5', t: 'Retrato 4:5 (feed do Instagram)' }, { v: '9:16', t: 'Vertical 9:16 (stories, reels, TikTok)' }, { v: '16:9', t: 'Horizontal 16:9 (banner do site)' }];
   function falta12() { return !S.cfg || !('ia_limite_mes' in S.cfg); }
@@ -3280,6 +3280,20 @@
       'Aspect ratio: ' + proporcao + '.'
     ].filter(Boolean).join('\n');
   }
+  function promptFotoPT(p, modo, cena, diretriz, proporcao) {
+    var m = MODOS_FOTO.filter(function (x) { return x.v === modo; })[0] || MODOS_FOTO[1];
+    var formato = { '1:1': 'quadrada (1:1)', '4:5': 'retrato (4:5)', '9:16': 'vertical (9:16)', '16:9': 'horizontal (16:9)' }[proporcao] || proporcao;
+    return [
+      'Edite a foto anexada do meu produto "' + p.nome + '"' + (p.medidas ? ' (tamanho aproximado: ' + p.medidas + ')' : '') + ' para um anúncio de loja online.',
+      'MUITO IMPORTANTE: mantenha o produto IDÊNTICO ao da foto: mesmo formato, proporções, cores, quantidade de peças, letras/textos e todos os detalhes. Não redesenhe, não acrescente nem tire partes, e mantenha o tamanho real crível.',
+      'Resultado: foto realista, nítida, iluminada, com cores vibrantes e chamativas, em alta qualidade.',
+      m.pt,
+      cena ? (modo === 'cartaz' ? 'Frase do cartaz: "' + cena + '"' : 'Cenário/tema: ' + cena) : '',
+      diretriz ? 'Diretrizes: ' + diretriz : '',
+      modo === 'cartaz' ? '' : 'Não coloque nenhum texto, marca d\'água, logo ou preço na imagem.',
+      'Formato da imagem: ' + formato + '.'
+    ].filter(Boolean).join('\n');
+  }
   function b64Blob(data, mime) { var bin = atob(data), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: mime || 'image/png' }); }
   function baixarBlob(blob, nome) { var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nome; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000); }
 
@@ -3287,7 +3301,7 @@
     var p = byId(S.produtos, pid);
     if (!p) { setHeader('Fotos com IA'); v.innerHTML = '<div class="card">Produto não encontrado. <a href="#/produtos">Voltar</a></div>'; return; }
     setHeader('🎨 Fotos com IA · ' + p.nome, '<a class="btn btn-g" href="#/anuncio/' + p.id + '">Anúncios</a><a class="btn btn-g" href="#/produto/' + p.id + '">Produto</a>');
-    if (falta12()) { v.innerHTML = '<div class="card note">Para usar as fotos com IA, rode o <b>script 12</b> no SQL Editor do Supabase e atualize a página (Ctrl+F5).</div>'; return; }
+
     var fotos = (p.fotos || []).filter(isUrl);
     if (!fotos.length) { v.innerHTML = '<div class="card note">Este produto ainda não tem foto. A IA precisa de pelo menos uma foto real para usar de base. <a href="#/produto/' + p.id + '">Adicionar fotos no produto</a></div>'; return; }
     var cfg = S.cfg || {}, st = S.ui.fotosIA && S.ui.fotosIA.pid === p.id ? S.ui.fotosIA : (S.ui.fotosIA = { pid: p.id, base: [fotos[0]], modo: 'ambiente', cena: '', diretriz: '', proporcao: '1:1', qtd: 2, ideias: [], res: [] });
@@ -3301,7 +3315,11 @@
       '<div class="grid g2" style="margin-top:12px"><div class="field"><label for="ft-dir">Suas diretrizes (opcional)</label><textarea class="inp" id="ft-dir" rows="3" placeholder="ex.: criança de uns 6 anos brincando no tapete da sala, luz de fim de tarde; ou: frase do cartaz &quot;Monte o seu!&quot;">' + esc(st.diretriz) + '</textarea></div>' +
       '<div class="stack" style="gap:10px"><div class="field"><label for="ft-prop">Formato</label><select class="inp" id="ft-prop">' + PROPORCOES.map(function (x) { return '<option value="' + x.v + '"' + (x.v === st.proporcao ? ' selected' : '') + '>' + esc(x.t) + '</option>'; }).join('') + '</select></div>' +
       '<div class="field"><label for="ft-qtd">Quantas versões</label><select class="inp" id="ft-qtd">' + [1, 2, 3, 4].map(function (n) { return '<option' + (n === st.qtd ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select></div></div></div>' +
-      '<div class="row between wrap" style="margin-top:10px"><span class="small muted" id="ft-gasto">Calculando o gasto do mês…</span><button type="button" class="btn btn-p" id="ft-gerar">🎨 Gerar fotos</button></div></div>' +
+      '</div>' +
+      '<div class="card"><h2>3. Gerar</h2><div class="grid g2">' +
+      '<div class="ft-via"><b>📋 No app do Gemini (sem custo extra)</b><div class="small muted" style="margin:4px 0 10px">Copia o pedido pronto, baixa a foto de base e abre o Gemini. Lá: cole o pedido (Ctrl+V), anexe a foto e envie.</div><button type="button" class="btn btn-p" id="ft-copiar">📋 Copiar pedido e abrir o Gemini</button></div>' +
+      '<div class="ft-via"><b>🎨 Direto aqui (pago por foto)</b><div class="small muted" style="margin:4px 0 10px" id="ft-gasto">' + (falta12() ? 'Precisa do script 12 e do faturamento ativo no Google AI Studio.' : 'Calculando o gasto do mês…') + '</div><button type="button" class="btn btn-g" id="ft-gerar"' + (falta12() ? ' disabled' : '') + '>🎨 Gerar aqui</button></div></div></div>' +
+      '<div class="card"><h2>4. Trazer a foto pronta do Gemini</h2><div class="ft-drop" id="ft-drop" tabindex="0">' + ICON.plus + '<span><b>Cole aqui (Ctrl+V)</b> a imagem copiada do Gemini, <b>arraste</b> o arquivo baixado<br>ou <b>clique para escolher</b>.</span></div><input type="file" id="ft-in" accept="image/*" multiple class="hidden"></div>' +
       '<div id="ft-res"></div></div>';
 
     function drawCena() {
@@ -3326,6 +3344,7 @@
         }).join('') + '</div></div>';
     }
     async function drawGasto() {
+      if (falta12()) return;
       var g = await gastoMes(); st.gasto = g;
       var el = $('#ft-gasto'); if (!el) return;
       el.innerHTML = 'Cada foto custa ~' + brl(custoImg) + ' · gerar ' + st.qtd + ' ≈ <b>' + brl(custoImg * st.qtd) + '</b> · usado este mês: <b>' + brl(g) + '</b> de ' + brl(limite);
@@ -3370,6 +3389,29 @@
         st.ideias = (r.data.dados.ideias || []).slice(0, 6); drawCena();
       } catch (err) { toast(err.message, true); b.disabled = false; b.textContent = '💡 Sugerir ideias para este produto'; }
     });
+    $('#ft-copiar').addEventListener('click', async function () {
+      if (st.modo === 'livre' && !st.diretriz.trim()) return toast('No modo "Do meu jeito", escreva as diretrizes', true);
+      if (st.modo === 'cartaz' && !st.cena.trim()) return toast('Escreva a frase do cartaz', true);
+      var aba = window.open('https://gemini.google.com/app', '_blank', 'noopener');
+      var txt = promptFotoPT(p, st.modo, st.cena.trim(), st.diretriz.trim(), st.proporcao);
+      try { await navigator.clipboard.writeText(txt); } catch (x) { var ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+      window.__ultimoPedidoFoto = txt;
+      for (var i = 0; i < st.base.length; i++) {
+        try { var bl = await (await fetch(st.base[i])).blob(); baixarBlob(bl, norm(p.nome).replace(/[^a-z0-9]+/g, '-') + '-base-' + (i + 1) + '.' + ((bl.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg'))); } catch (x) { }
+      }
+      toast('Pedido copiado ✓ No Gemini: cole (Ctrl+V), anexe a foto baixada e envie');
+    });
+    function trazer(files) {
+      var n = 0;
+      files.forEach(function (f) { if (!/^image\//.test(f.type)) return; st.res.unshift({ blob: f, url: URL.createObjectURL(f), rotulo: 'Trazida do Gemini' }); n++; });
+      if (!n) return toast('Isso não parece uma imagem', true);
+      drawRes(); toast(n + ' foto(s) prontas — escolha o que fazer com cada uma'); $('#ft-res').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    pasteAlvo.pagina = trazer;
+    soltarImagens($('#ft-drop'), trazer);
+    $('#ft-drop').addEventListener('click', function () { $('#ft-in').click(); });
+    $('#ft-drop').addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('#ft-in').click(); } });
+    $('#ft-in').addEventListener('change', function (e) { var f = Array.prototype.slice.call(e.target.files || []); e.target.value = ''; if (f.length) trazer(f); });
     $('#ft-gerar').addEventListener('click', async function () {
       var b = this;
       if (st.modo === 'livre' && !st.diretriz.trim()) return toast('No modo "Do meu jeito", escreva as diretrizes', true);
@@ -3390,7 +3432,7 @@
         if (r.data.falhas) toast(r.data.falhas + ' versão(ões) não saíram; as outras estão prontas', true);
         $('#ft-res').scrollIntoView({ behavior: 'smooth', block: 'start' });
       } catch (err) { toast(err.message, true); }
-      b.disabled = false; b.textContent = '🎨 Gerar fotos';
+      b.disabled = false; b.textContent = '🎨 Gerar aqui';
     });
     async function adicionar(i, capa) {
       var r = st.res[i];
