@@ -482,7 +482,7 @@
   }
   function go(h) { if (location.hash === h) render(); else location.hash = h; }
   function renderNav(tela) {
-    var base = tela === 'produto' ? 'produtos' : tela === 'pedido' ? 'pedidos' : (tela === 'anuncio' || tela === 'shopee') ? 'anuncios' : tela;
+    var base = tela === 'produto' ? 'produtos' : tela === 'pedido' ? 'pedidos' : (tela === 'anuncio' || tela === 'shopee' || tela === 'fotos') ? 'anuncios' : tela;
     $('#nav').innerHTML = NAV.map(function (n) {
       if (n.sep) return '<div class="nav-sep"></div>';
       return '<a class="nav-btn' + (n.id === base ? ' on' : '') + '" href="#/' + n.id + '">' + esc(n.t) + (n.soon ? '<span class="soon">' + n.soon + '</span>' : '') + '</a>';
@@ -512,6 +512,7 @@
     v.onclick = null;
     v.onkeydown = null;
     v.onchange = null;
+    v.oninput = null;
     pasteAlvo.pagina = null;
     dirty = false;
     if (!S.ui.focoBusca) window.scrollTo(0, 0);
@@ -533,6 +534,7 @@
         case 'anuncios': return telaAnuncios(v);
         case 'anuncio': return telaAnuncio(v, r.arg);
         case 'shopee': return telaShopee(v);
+        case 'fotos': return telaFotos(v, r.arg);
         default: go('#/painel');
       }
     } catch (e) {
@@ -780,7 +782,7 @@
       '<button type="button" class="icon-btn" id="est-mais" aria-label="Aumentar estoque">+</button>' +
       '<div class="small muted grow" id="est-info"></div></div></div>' +
       // anúncios
-      '<div class="card"><div class="row between wrap"><h2 style="margin:0">Onde está anunciado</h2>' + (novo ? '' : '<div class="row" style="gap:6px"><button type="button" class="btn btn-g btn-s" id="dup-prod">Duplicar produto</button><button type="button" class="btn btn-p btn-s" id="ads-ia">✨ Anúncios</button></div>') + '</div><div id="ads" class="ads" style="margin-top:8px"></div>' +
+      '<div class="card"><div class="row between wrap"><h2 style="margin:0">Onde está anunciado</h2>' + (novo ? '' : '<div class="row wrap" style="gap:6px"><button type="button" class="btn btn-g btn-s" id="dup-prod">Duplicar produto</button><a class="btn btn-g btn-s" href="#/fotos/' + p.id + '">🎨 Fotos com IA</a><button type="button" class="btn btn-p btn-s" id="ads-ia">✨ Anúncios</button></div>') + '</div><div id="ads" class="ads" style="margin-top:8px"></div>' +
       '<div class="hint" style="margin-top:8px">O preço sugerido de cada plataforma cobre a taxa dela (configure as taxas em Configurações).</div></div>' +
       // salvar
       '<div class="sticky-save">' + (novo ? '' : '<button type="button" class="btn btn-d" id="del" style="margin-right:auto">Excluir</button>') +
@@ -2838,7 +2840,7 @@
       '<div class="lbl" style="margin:10px 0 6px">1. Onde vai anunciar? (pode marcar várias)</div><div class="row wrap" style="gap:6px" id="an-plats">' +
       visiveis.map(function (pl) { return '<button type="button" class="chip" data-pl="' + pl.id + '">' + esc(pl.nome) + '</button>'; }).join('') +
       '<a class="small" href="#/anuncios" style="align-self:center;margin-left:4px">outras plataformas…</a></div>' +
-      '<div class="lbl" style="margin:14px 0 6px">2. Crie</div><div class="row wrap" style="gap:8px"><button type="button" class="btn btn-p" id="an-gerar">✨ Criar com IA</button><button type="button" class="btn btn-g" id="an-add">Criar em branco</button><button type="button" class="btn btn-g" id="an-fotos">Baixar fotos</button></div>' +
+      '<div class="lbl" style="margin:14px 0 6px">2. Crie</div><div class="row wrap" style="gap:8px"><button type="button" class="btn btn-p" id="an-gerar">✨ Criar com IA</button><button type="button" class="btn btn-g" id="an-add">Criar em branco</button><button type="button" class="btn btn-g" id="an-fotos">Baixar fotos</button><a class="btn btn-g" href="#/fotos/' + p.id + '">🎨 Fotos com IA</a></div>' +
       '<details style="margin-top:10px"><summary class="small" style="cursor:pointer">Opções da IA</summary><div class="grid g2" style="margin-top:8px"><div class="field"><label for="an-motor">Quem escreve</label><select class="inp" id="an-motor">' + MOTORES.map(function (x) { return '<option value="' + x.v + '"' + (x.off ? ' disabled' : '') + '>' + esc(x.t) + '</option>'; }).join('') + '</select></div>' +
       '<div class="field"><label for="an-extra">Pedido extra (opcional)</label><input class="inp" id="an-extra" placeholder="ex.: destacar que é presente de Natal"></div></div></details>' +
       '<div class="small muted" id="an-info" style="margin-top:8px">' + ((p.fotos || []).length ? 'A IA olha até 3 fotos do produto e cria um anúncio novo para cada plataforma marcada.' : 'Sem fotos: a IA usa só os dados do produto.') + '</div></div></div></div>' +
@@ -3082,6 +3084,7 @@
     return '<div class="card"><h2>Anúncios com IA</h2><div class="stack">' +
       '<div class="field"><label for="ia-regras">Regras que todo anúncio segue</label><textarea class="inp" id="ia-regras" rows="5">' + esc(c.regras_anuncio || '') + '</textarea><div class="hint">Uma por linha. A IA adapta ao estilo de cada plataforma (nos marketplaces ela não coloca WhatsApp, porque é proibido lá).</div></div>' +
       ('modelo_anuncio' in c ? '<div class="field"><label for="ia-exemplo">Anúncio modelo (a IA copia a estrutura e o tom)</label><textarea class="inp" id="ia-exemplo" rows="10">' + esc(c.modelo_anuncio || '') + '</textarea><div class="hint">Cole aqui um anúncio que vocês gostam. Troque quando quiserem mudar o estilo.</div></div>' : '<div class="note">Rode o <b>script 09</b> para guardar o anúncio modelo da Fran.</div>') +
+      ('ia_limite_mes' in c ? '<div class="grid g3"><div class="field"><label for="ia-teto">Teto das fotos com IA (R$/mês)</label><input class="inp" id="ia-teto" inputmode="decimal" value="' + esc(fmtIn(c.ia_limite_mes)) + '"></div><div class="field"><label for="ia-custo">Custo estimado por foto (R$)</label><input class="inp" id="ia-custo" inputmode="decimal" value="' + esc(fmtIn(c.ia_custo_imagem)) + '"><div class="hint">Confira o valor real no Google AI Studio › Billing.</div></div><div class="field"><label for="ia-mod-img">Modelo de imagem</label><input class="inp" id="ia-mod-img" value="' + esc(c.ia_modelo_imagem || '') + '"></div></div>' : '') +
       '<div class="grid g2"><div class="field"><label for="ia-modelo">Modelo do Gemini</label><input class="inp" id="ia-modelo" value="' + esc(c.ia_modelo || 'gemini-3.8-flash') + '"><div class="hint">Se esse sair do ar, o sistema tenta sozinho o mais novo disponível.</div></div>' +
       '<div class="row" style="align-items:flex-end;justify-content:flex-end;gap:8px"><button class="btn btn-g" id="ia-testar" type="button">Testar conexão</button><button class="btn btn-p" id="ia-salvar" type="button">Salvar</button></div></div>' +
       '<details class="note"><summary style="cursor:pointer;font-weight:700">Como ligar o Gemini (uma vez só)</summary><ol style="margin:8px 0 0 18px;padding:0;line-height:1.7">' +
@@ -3093,7 +3096,7 @@
   function ligarIAConfig() {
     if (!$('#ia-salvar')) return;
     $('#ia-salvar').addEventListener('click', async function () {
-      try { S.cfg = q(await sb.from('configuracoes').update(Object.assign({ regras_anuncio: $('#ia-regras').value.trim() || null, ia_modelo: $('#ia-modelo').value.trim() || 'gemini-3.8-flash', atualizado_em: new Date().toISOString() }, $('#ia-exemplo') ? { modelo_anuncio: $('#ia-exemplo').value.trim() || null } : {})).eq('id', 1).select().single()); toast('Regras dos anúncios salvas ✓'); }
+      try { S.cfg = q(await sb.from('configuracoes').update(Object.assign({ regras_anuncio: $('#ia-regras').value.trim() || null, ia_modelo: $('#ia-modelo').value.trim() || 'gemini-3.8-flash', atualizado_em: new Date().toISOString() }, $('#ia-exemplo') ? { modelo_anuncio: $('#ia-exemplo').value.trim() || null } : {}, $('#ia-teto') ? { ia_limite_mes: num($('#ia-teto').value) || 30, ia_custo_imagem: num($('#ia-custo').value) || 0.25, ia_modelo_imagem: $('#ia-mod-img').value.trim() || 'gemini-nano-banana-2.1' } : {})).eq('id', 1).select().single()); toast('Regras dos anúncios salvas ✓'); }
       catch (err) { toast(erroMsg(err), true); }
     });
     $('#ia-testar').addEventListener('click', async function () {
@@ -3241,6 +3244,175 @@
         toast('Planilha baixada ✓ — agora suba no Seller Centre');
       } catch (err) { toast(err.message || erroMsg(err), true); }
       b.disabled = false; b.textContent = 'Baixar planilha da Shopee';
+    });
+  }
+
+  // ================================================================== FOTOS COM IA (Nano Banana)
+  var MODOS_FOTO = [
+    { v: 'branco', t: '⚪ Fundo branco', d: 'Capa para Shopee e Mercado Livre', p: 'Place the product on a pure white seamless background (#FFFFFF), centered, filling about 85% of the frame, with a soft natural contact shadow. No props, no text, no logos, no other objects.' },
+    { v: 'ambiente', t: '🏠 Ambiente', d: 'Num lugar que combina com o produto', p: 'Place the product in a realistic, attractive real-life setting where it would naturally be used, styled like a lifestyle catalog photo. The product must be the clear hero of the image, in sharp focus, with the background slightly blurred.' },
+    { v: 'uso', t: '🙌 Em uso', d: 'Alguém usando, mostra o tamanho', p: 'Show the product being used naturally by a person (hands or a person in the scene, face not the focus), so the buyer understands how it is used and its real size. Candid lifestyle photo, warm and inviting.' },
+    { v: 'tema', t: '🎄 Data / tema', d: 'Natal, Dia das Crianças, festa…', p: 'Create a festive seasonal scene for the theme described below, with decorative elements around the product that match the theme. Vibrant, joyful, eye-catching colors, but keep it realistic and keep the product clearly visible and unchanged.' },
+    { v: 'cartaz', t: '📰 Cartaz / banner', d: 'Com frase e cara de propaganda', p: 'Create an eye-catching advertising poster / banner featuring the product, with a bold modern layout, vibrant colors and the headline text given below written exactly as provided, in Brazilian Portuguese, large and perfectly legible. Leave clean space around the text.' },
+    { v: 'detalhe', t: '🔍 Detalhe', d: 'Close mostrando acabamento', p: 'Create a close-up macro product shot highlighting the details, texture and finish of the product, shallow depth of field, studio lighting.' },
+    { v: 'kit', t: '🎁 Kit / presente', d: 'Embalado para presente ou em conjunto', p: 'Present the product as a lovely gift: arranged with simple gift packaging (kraft box, ribbon, tissue paper) in a clean, cozy setting, suggesting it is a great present.' },
+    { v: 'livre', t: '✍️ Do meu jeito', d: 'Você descreve tudo', p: '' }
+  ];
+  var PROPORCOES = [{ v: '1:1', t: 'Quadrada 1:1 (marketplaces)' }, { v: '4:5', t: 'Retrato 4:5 (feed do Instagram)' }, { v: '9:16', t: 'Vertical 9:16 (stories, reels, TikTok)' }, { v: '16:9', t: 'Horizontal 16:9 (banner do site)' }];
+  function falta12() { return !S.cfg || !('ia_limite_mes' in S.cfg); }
+  function inicioMes() { var d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString(); }
+  async function gastoMes() {
+    var r = await sb.from('ia_uso').select('custo').gte('criado_em', inicioMes());
+    if (r.error) return 0;
+    return (r.data || []).reduce(function (a, x) { return a + (num(x.custo) || 0); }, 0);
+  }
+  function promptFoto(p, modo, cena, diretriz, proporcao) {
+    var m = MODOS_FOTO.filter(function (x) { return x.v === modo; })[0] || MODOS_FOTO[1];
+    return [
+      'You are a professional product photographer and retoucher for an e-commerce store in Brazil.',
+      'The attached photo(s) show the REAL product: "' + p.nome + '"' + (p.medidas ? ' (approx. size: ' + p.medidas + ')' : '') + '.',
+      'CRITICAL: keep the product IDENTICAL to the photo — same shape, proportions, colors, number of parts, text and letters on it, and every detail. Do not redesign, add or remove parts of the product, and keep its real-world scale believable.',
+      'Make the result vibrant, bright, sharp and eye-catching, photorealistic, high quality, suitable for marketplace ads.',
+      m.p,
+      cena ? 'Scene / theme: ' + cena : '',
+      diretriz ? 'Extra instructions from the store owner (follow them, they may be in Portuguese): ' + diretriz : '',
+      modo === 'cartaz' ? '' : 'Do not add any text, watermark, logo or price to the image.',
+      'Aspect ratio: ' + proporcao + '.'
+    ].filter(Boolean).join('\n');
+  }
+  function b64Blob(data, mime) { var bin = atob(data), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Blob([u], { type: mime || 'image/png' }); }
+  function baixarBlob(blob, nome) { var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = nome; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000); }
+
+  function telaFotos(v, pid) {
+    var p = byId(S.produtos, pid);
+    if (!p) { setHeader('Fotos com IA'); v.innerHTML = '<div class="card">Produto não encontrado. <a href="#/produtos">Voltar</a></div>'; return; }
+    setHeader('🎨 Fotos com IA · ' + p.nome, '<a class="btn btn-g" href="#/anuncio/' + p.id + '">Anúncios</a><a class="btn btn-g" href="#/produto/' + p.id + '">Produto</a>');
+    if (falta12()) { v.innerHTML = '<div class="card note">Para usar as fotos com IA, rode o <b>script 12</b> no SQL Editor do Supabase e atualize a página (Ctrl+F5).</div>'; return; }
+    var fotos = (p.fotos || []).filter(isUrl);
+    if (!fotos.length) { v.innerHTML = '<div class="card note">Este produto ainda não tem foto. A IA precisa de pelo menos uma foto real para usar de base. <a href="#/produto/' + p.id + '">Adicionar fotos no produto</a></div>'; return; }
+    var cfg = S.cfg || {}, st = S.ui.fotosIA && S.ui.fotosIA.pid === p.id ? S.ui.fotosIA : (S.ui.fotosIA = { pid: p.id, base: [fotos[0]], modo: 'ambiente', cena: '', diretriz: '', proporcao: '1:1', qtd: 2, ideias: [], res: [] });
+    var custoImg = num(cfg.ia_custo_imagem) || 0.25, limite = num(cfg.ia_limite_mes) || 30;
+    v.innerHTML = '<div class="stack">' +
+      '<div class="card"><h2>1. Foto real de base <span class="small muted">(marque 1 a 3)</span></h2><div class="row wrap" style="gap:10px" id="ft-base">' +
+      fotos.map(function (f) { return '<button type="button" class="ft-base' + (st.base.indexOf(f) >= 0 ? ' on' : '') + '" data-base="' + esc(f) + '"><img src="' + esc(f) + '" alt="Foto do produto" loading="lazy"></button>'; }).join('') + '</div></div>' +
+      '<div class="card"><h2>2. Que tipo de foto?</h2><div class="ft-modos" id="ft-modos">' +
+      MODOS_FOTO.map(function (m) { return '<button type="button" class="ft-modo' + (m.v === st.modo ? ' on' : '') + '" data-modo="' + m.v + '"><b>' + esc(m.t) + '</b><span>' + esc(m.d) + '</span></button>'; }).join('') + '</div>' +
+      '<div id="ft-cena-box" style="margin-top:12px"></div>' +
+      '<div class="grid g2" style="margin-top:12px"><div class="field"><label for="ft-dir">Suas diretrizes (opcional)</label><textarea class="inp" id="ft-dir" rows="3" placeholder="ex.: criança de uns 6 anos brincando no tapete da sala, luz de fim de tarde; ou: frase do cartaz &quot;Monte o seu!&quot;">' + esc(st.diretriz) + '</textarea></div>' +
+      '<div class="stack" style="gap:10px"><div class="field"><label for="ft-prop">Formato</label><select class="inp" id="ft-prop">' + PROPORCOES.map(function (x) { return '<option value="' + x.v + '"' + (x.v === st.proporcao ? ' selected' : '') + '>' + esc(x.t) + '</option>'; }).join('') + '</select></div>' +
+      '<div class="field"><label for="ft-qtd">Quantas versões</label><select class="inp" id="ft-qtd">' + [1, 2, 3, 4].map(function (n) { return '<option' + (n === st.qtd ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select></div></div></div>' +
+      '<div class="row between wrap" style="margin-top:10px"><span class="small muted" id="ft-gasto">Calculando o gasto do mês…</span><button type="button" class="btn btn-p" id="ft-gerar">🎨 Gerar fotos</button></div></div>' +
+      '<div id="ft-res"></div></div>';
+
+    function drawCena() {
+      var box = $('#ft-cena-box');
+      if (st.modo === 'branco' || st.modo === 'livre' || st.modo === 'detalhe') { box.innerHTML = ''; return; }
+      var rot = st.modo === 'tema' ? 'Tema' : st.modo === 'cartaz' ? 'Frase do cartaz' : 'Cenário';
+      var ph = st.modo === 'tema' ? 'ex.: Natal, com pinheiro e luzes' : st.modo === 'cartaz' ? 'ex.: Organize suas canetas com estilo!' : 'ex.: escrivaninha de estudante, clara e organizada';
+      box.innerHTML = '<div class="field"><div class="row between wrap"><label for="ft-cena">' + rot + '</label>' + (st.modo === 'cartaz' ? '' : '<button type="button" class="btn btn-g btn-s" id="ft-ideias">💡 Sugerir ideias para este produto</button>') + '</div>' +
+        '<input class="inp" id="ft-cena" value="' + esc(st.cena) + '" placeholder="' + esc(ph) + '">' +
+        (st.modo === 'tema' && !st.ideias.length ? '<div class="row wrap" style="gap:6px;margin-top:8px">' + ['Natal', 'Dia das Crianças', 'Dia das Mães', 'Dia dos Pais', 'Páscoa', 'Black Friday', 'Volta às aulas', 'Festa de aniversário'].map(function (t) { return '<button type="button" class="chip" data-ideia="' + esc(t) + '">' + esc(t) + '</button>'; }).join('') + '</div>' : '') +
+        (st.ideias.length ? '<div class="row wrap" style="gap:6px;margin-top:8px">' + st.ideias.map(function (t) { return '<button type="button" class="chip" data-ideia="' + esc(t) + '">' + esc(t) + '</button>'; }).join('') + '</div>' : '') +
+        (st.modo === 'cartaz' ? '<div class="hint">A IA às vezes erra letras em textos. Confira antes de usar; frases curtas funcionam melhor.</div>' : '') + '</div>';
+    }
+    function drawRes() {
+      var box = $('#ft-res');
+      if (!st.res.length) { box.innerHTML = ''; return; }
+      box.innerHTML = '<div class="card"><div class="row between wrap"><h2 style="margin:0">Resultado</h2><button type="button" class="btn btn-g btn-s" id="ft-baixar-todas">Baixar todas</button></div><div class="hint" style="margin:6px 0 12px">Confira se o produto ficou igual ao real. Só fica guardado o que você adicionar ao produto ou baixar.</div><div class="ft-grid">' +
+        st.res.map(function (r, i) {
+          return '<div class="ft-item' + (r.salva ? ' salva' : '') + '"><img class="zoomable" src="' + r.url + '" data-zoom="' + esc(JSON.stringify([r.url])) + '" alt="Foto gerada ' + (i + 1) + '"><div class="small muted" style="margin:6px 0">' + esc(r.rotulo) + '</div><div class="row wrap" style="gap:6px">' +
+            (r.salva ? '<span class="pill p-ok">nas fotos do produto ✓</span>' : '<button type="button" class="btn btn-p btn-s" data-ft="add" data-i="' + i + '">+ Fotos do produto</button><button type="button" class="btn btn-g btn-s" data-ft="capa" data-i="' + i + '">Usar como capa</button>') +
+            '<button type="button" class="btn btn-g btn-s" data-ft="baixar" data-i="' + i + '">Baixar</button><button type="button" class="icon-btn" data-ft="x" data-i="' + i + '" aria-label="Descartar">' + BTN_DEL + '</button></div></div>';
+        }).join('') + '</div></div>';
+    }
+    async function drawGasto() {
+      var g = await gastoMes(); st.gasto = g;
+      var el = $('#ft-gasto'); if (!el) return;
+      el.innerHTML = 'Cada foto custa ~' + brl(custoImg) + ' · gerar ' + st.qtd + ' ≈ <b>' + brl(custoImg * st.qtd) + '</b> · usado este mês: <b>' + brl(g) + '</b> de ' + brl(limite);
+    }
+    drawCena(); drawRes(); drawGasto();
+
+    $('#ft-base').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-base]'); if (!b) return;
+      var f = b.dataset.base, k = st.base.indexOf(f);
+      if (k >= 0) { if (st.base.length === 1) return toast('Deixe pelo menos uma foto de base', true); st.base.splice(k, 1); }
+      else { if (st.base.length >= 3) return toast('No máximo 3 fotos de base', true); st.base.push(f); }
+      b.classList.toggle('on', st.base.indexOf(f) >= 0);
+    });
+    $('#ft-modos').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-modo]'); if (!b) return;
+      st.modo = b.dataset.modo; st.ideias = []; st.cena = '';
+      $$('#ft-modos .ft-modo').forEach(function (x) { x.classList.toggle('on', x === b); });
+      if (st.modo === 'branco' && st.proporcao !== '1:1') { st.proporcao = '1:1'; $('#ft-prop').value = '1:1'; }
+      drawCena();
+    });
+    v.oninput = function (e) {
+      if (e.target.id === 'ft-cena') st.cena = e.target.value;
+      if (e.target.id === 'ft-dir') st.diretriz = e.target.value;
+    };
+    v.onchange = function (e) {
+      if (e.target.id === 'ft-prop') st.proporcao = e.target.value;
+      if (e.target.id === 'ft-qtd') { st.qtd = +e.target.value; drawGasto(); }
+    };
+    $('#ft-cena-box').addEventListener('click', async function (e) {
+      var c = e.target.closest('[data-ideia]'); if (c) { st.cena = c.dataset.ideia; $('#ft-cena').value = st.cena; return; }
+      if (e.target.id !== 'ft-ideias') return;
+      var b = e.target; b.disabled = true; b.innerHTML = '<span class="spinner"></span> Pensando…';
+      try {
+        var pedido = st.modo === 'tema' ? 'temas sazonais ou datas comemorativas brasileiras em que este produto venderia bem (com a decoração que combina)' : st.modo === 'uso' ? 'situações de uso com pessoas que mostram bem o produto e o tamanho dele' : 'cenários/ambientes realistas onde este produto fica bonito e faz sentido';
+        var r = await sb.functions.invoke('gerar-anuncio', { body: {
+          prompt: 'Produto de uma loja de impressão 3D de Curitiba: ' + JSON.stringify(dadosProdutoIA(p)) + '\nSugira 5 ' + pedido + ' para uma foto de anúncio. Cada sugestão em português, curta (até 12 palavras), concreta e visual.',
+          fotos: st.base.slice(0, 1), modelo: cfg.ia_modelo || 'gemini-3.8-flash',
+          schema: { type: 'OBJECT', properties: { ideias: { type: 'ARRAY', items: { type: 'STRING' } } }, required: ['ideias'] }
+        } });
+        if (r.error) throw new Error(await erroFuncao(r.error));
+        if (!r.data || !r.data.dados) throw new Error('A função do Supabase está na versão antiga. Publique de novo o código novo da função gerar-anuncio.');
+        st.ideias = (r.data.dados.ideias || []).slice(0, 6); drawCena();
+      } catch (err) { toast(err.message, true); b.disabled = false; b.textContent = '💡 Sugerir ideias para este produto'; }
+    });
+    $('#ft-gerar').addEventListener('click', async function () {
+      var b = this;
+      if (st.modo === 'livre' && !st.diretriz.trim()) return toast('No modo "Do meu jeito", escreva as diretrizes', true);
+      if (st.modo === 'cartaz' && !st.cena.trim()) return toast('Escreva a frase do cartaz', true);
+      var g = st.gasto != null ? st.gasto : await gastoMes();
+      if (g + custoImg * st.qtd > limite + 0.001) return toast('Isso passaria do teto do mês (' + brl(limite) + '). Já foram ' + brl(g) + '. Dá para mudar o teto em Configurações.', true);
+      b.disabled = true; b.innerHTML = '<span class="spinner"></span> Criando (até 1 minuto)…';
+      try {
+        var r = await sb.functions.invoke('gerar-anuncio', { body: { tipo: 'imagem', prompt: promptFoto(p, st.modo, st.cena.trim(), st.diretriz.trim(), st.proporcao), fotos: st.base, quantidade: st.qtd, proporcao: st.proporcao, modelo_imagem: cfg.ia_modelo_imagem || 'gemini-nano-banana-2.1' } });
+        if (r.error) throw new Error(await erroFuncao(r.error));
+        if (r.data && r.data.erro) throw new Error(r.data.erro);
+        if (!r.data || !r.data.imagens) throw new Error('A função do Supabase está na versão antiga. Publique de novo o código novo da função gerar-anuncio.');
+        var m = MODOS_FOTO.filter(function (x) { return x.v === st.modo; })[0];
+        var rot = m.t.replace(/^\S+\s/, '') + (st.cena ? ' · ' + st.cena : '') + ' · ' + st.proporcao;
+        r.data.imagens.forEach(function (im) { var bl = b64Blob(im.data, im.mime); st.res.unshift({ blob: bl, url: URL.createObjectURL(bl), rotulo: rot }); });
+        try { await sb.from('ia_uso').insert({ tipo: 'imagem', quantidade: r.data.imagens.length, custo: Math.round(custoImg * r.data.imagens.length * 100) / 100, produto_id: p.id, modelo: r.data.modelo }); } catch (x) { }
+        st.gasto = null; drawRes(); drawGasto();
+        if (r.data.falhas) toast(r.data.falhas + ' versão(ões) não saíram; as outras estão prontas', true);
+        $('#ft-res').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch (err) { toast(err.message, true); }
+      b.disabled = false; b.textContent = '🎨 Gerar fotos';
+    });
+    async function adicionar(i, capa) {
+      var r = st.res[i];
+      try {
+        var jpg = await comprimir(new File([r.blob], 'ia.png', { type: r.blob.type }), 1600, 0.88);
+        var url = await enviarFoto(jpg, 'produtos/' + p.id);
+        var atual = (byId(S.produtos, p.id).fotos || []).slice();
+        var novas = capa ? [url].concat(atual) : atual.concat([url]);
+        var pr = q(await sb.from('produtos').update({ fotos: novas }).eq('id', p.id).select().single());
+        S.produtos = S.produtos.map(function (x) { return x.id === pr.id ? pr : x; }); p = pr;
+        r.salva = true; drawRes();
+        toast(capa ? 'Virou a capa do produto ✓ (site e anúncios)' : 'Adicionada às fotos do produto ✓ (site e anúncios)');
+      } catch (err) { toast('Não salvou: ' + erroMsg(err), true); }
+    }
+    $('#ft-res').addEventListener('click', function (e) {
+      if (e.target.id === 'ft-baixar-todas') { st.res.forEach(function (r, i) { baixarBlob(r.blob, norm(p.nome).replace(/[^a-z0-9]+/g, '-') + '-ia-' + (i + 1) + '.png'); }); return; }
+      var b = e.target.closest('[data-ft]'); if (!b) return;
+      var i = +b.dataset.i, a = b.dataset.ft;
+      if (a === 'baixar') baixarBlob(st.res[i].blob, norm(p.nome).replace(/[^a-z0-9]+/g, '-') + '-ia-' + (i + 1) + '.png');
+      if (a === 'add') adicionar(i, false);
+      if (a === 'capa') adicionar(i, true);
+      if (a === 'x') { URL.revokeObjectURL(st.res[i].url); st.res.splice(i, 1); drawRes(); }
     });
   }
 

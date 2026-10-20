@@ -61,7 +61,42 @@ Deno.serve(async (req) => {
       } catch (_) { /* foto que não abre é ignorada */ }
     }
 
-    const schema = {
+    // ---- fotos com IA (Nano Banana): devolve imagens em base64
+    if (b.tipo === "imagem") {
+      if (!partesFoto.length) return json({ erro: "Não consegui abrir a foto do produto para usar de base." }, 400);
+      const n = Math.max(1, Math.min(4, Number(b.quantidade) || 1));
+      const mods = [b.modelo_imagem, "gemini-3.1-flash-image", "gemini-3.1-flash-lite-image"].filter((m, i, a) => m && a.indexOf(m) === i);
+      let erroImg = "";
+      for (const modelo of mods) {
+        const umaVez = async () => {
+          const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+            body: JSON.stringify({
+              contents: [{ role: "user", parts: [{ text: prompt }, ...partesFoto] }],
+              generationConfig: { responseModalities: ["TEXT", "IMAGE"], imageConfig: { aspectRatio: String(b.proporcao || "1:1") } },
+            }),
+          });
+          const d = await r.json().catch(() => ({}));
+          if (!r.ok) throw Object.assign(new Error(d?.error?.message || String(r.status)), { status: r.status });
+          const partes = d?.candidates?.[0]?.content?.parts || [];
+          const img = partes.map((p: Record<string, any>) => p.inlineData || p.inline_data).filter((x: unknown) => x)[0];
+          if (!img) throw Object.assign(new Error("o modelo não devolveu imagem (" + (d?.candidates?.[0]?.finishReason || "sem motivo") + ")"), { status: 422 });
+          return { mime: img.mimeType || img.mime_type || "image/png", data: img.data };
+        };
+        const res = await Promise.allSettled(Array.from({ length: n }, () => umaVez()));
+        const ok = res.filter((x) => x.status === "fulfilled").map((x) => (x as PromiseFulfilledResult<{ mime: string; data: string }>).value);
+        if (ok.length) return json({ versao: 3, modelo, imagens: ok, falhas: n - ok.length });
+        const e = (res[0] as PromiseRejectedResult).reason as { message: string; status?: number };
+        erroImg = `${modelo}: ${e.message}`;
+        if (e.status === 404 || e.status === 400 || (e.status || 0) >= 500) continue;
+        break;
+      }
+      const semFat = /billing|free tier|limit: 0|quota/i.test(erroImg);
+      return json({ erro: semFat ? "Para gerar imagens, ative o faturamento (billing) do projeto no Google AI Studio. Detalhe: " + erroImg : "Não consegui gerar a imagem: " + erroImg }, 502);
+    }
+
+    const schema = b.schema || {
       type: "OBJECT",
       properties: {
         anuncios: {
@@ -101,7 +136,8 @@ Deno.serve(async (req) => {
       const texto = (d?.candidates?.[0]?.content?.parts || []).filter((p: { thought?: boolean }) => !p.thought).map((p: { text?: string }) => p.text || "").join("");
       let out;
       try { out = JSON.parse(texto); } catch (_) { ultimoErro = `${modelo}: resposta fora do formato`; continue; }
-      return json({ versao: 2, modelo, fotos: partesFoto.length, anuncios: out.anuncios || [] });
+      if (b.schema) return json({ versao: 3, modelo, dados: out });
+      return json({ versao: 3, modelo, fotos: partesFoto.length, anuncios: out.anuncios || [] });
     }
     const limite = /quota|rate|exhaust/i.test(ultimoErro);
     return json({ erro: limite ? "Limite grátis do Gemini atingido por agora. Espere um minuto e tente de novo." : "O Gemini não respondeu: " + ultimoErro }, 502);
