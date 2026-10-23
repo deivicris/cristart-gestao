@@ -384,6 +384,23 @@
   }
   function byId(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
   function impressoras() { return S.equipamentos.filter(function (e) { return e.tipo === 'impressora' && e.status !== 'desativado'; }); }
+  function novaCategoria(pronto) {
+    var m = modal('<div class="row between"><h2>Nova categoria</h2><button class="btn btn-g btn-s" data-x="close">Fechar</button></div>' +
+      '<div class="field"><label for="nc-nome">Nome da categoria</label><input class="inp" id="nc-nome" placeholder="ex.: Cozinha, Natal, Escritório" maxlength="40"></div>' +
+      '<div class="hint">Ela aparece para todos os produtos e no site. Para renomear ou tirar categorias, use Configurações.</div>' +
+      '<div class="row" style="justify-content:flex-end"><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="ok">Criar categoria</button></div>', { size: 'sm' });
+    async function salvar() {
+      var nome = $('#nc-nome', m).value.trim().replace(/\s+/g, ' ');
+      if (!nome) return toast('Escreva o nome', true);
+      var lista = categorias().slice(), igual = lista.filter(function (c) { return norm(c) === norm(nome); })[0];
+      if (igual) { closeModal(); pronto(igual); return toast('“' + igual + '” já existe — selecionei ela'); }
+      lista.push(nome);
+      try { S.cfg = q(await sb.from('configuracoes').update({ categorias: lista }).eq('id', 1).select().single()); closeModal(); pronto(nome); toast('Categoria “' + nome + '” criada ✓'); }
+      catch (err) { toast(erroMsg(err), true); }
+    }
+    m.addEventListener('click', function (e) { var b = e.target.closest('[data-x]'); if (!b) return; if (b.dataset.x === 'close') closeModal(); else salvar(); });
+    $('#nc-nome', m).addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); salvar(); } });
+  }
   function categorias() { return (S.cfg && S.cfg.categorias && S.cfg.categorias.length) ? S.cfg.categorias : ['Decoração', 'Chaveiros', 'Expositores', 'Gamer', 'Brinquedos', 'Utilidades', 'Acessórios']; }
   function tiposFilamento() {
     var base = ['PLA', 'PETG', 'PLA Silk', 'PLA Matte', 'ABS', 'TPU'];
@@ -713,7 +730,7 @@
 
     var fBasico = [
       { k: 'nome', label: 'Nome do produto', span: 2 },
-      { k: 'categoria', label: 'Categoria', type: 'select', opts: categorias() },
+      { k: 'categoria', label: 'Categoria', type: 'select', opts: categorias().concat(p.categoria && categorias().indexOf(p.categoria) < 0 ? [p.categoria] : []).concat([{ v: '__nova', t: '➕ Nova categoria…' }]) },
       { k: 'tipo_produto', label: 'Tipo', type: 'select', opts: [{ v: 'impresso', t: 'Impresso por nós' }, { v: 'revenda', t: 'Revenda' }] }
     ];
     var fFlags = [
@@ -880,6 +897,18 @@
     if ($('#ads-ia')) $('#ads-ia').addEventListener('click', function () {
       if (dirty) return toast('Salve o produto antes de abrir os anúncios', true);
       go('#/anuncio/' + p.id);
+    });
+    var selCat = $('[data-k="categoria"]'), catAnterior = selCat ? selCat.value : null;
+    if (selCat) selCat.addEventListener('change', function () {
+      if (selCat.value !== '__nova') { catAnterior = selCat.value; return; }
+      selCat.value = catAnterior;
+      novaCategoria(function (nome) {
+        if (!Array.prototype.some.call(selCat.options, function (o) { return o.value === nome; })) {
+          var o = document.createElement('option'); o.value = nome; o.textContent = nome;
+          selCat.insertBefore(o, selCat.querySelector('option[value="__nova"]'));
+        }
+        selCat.value = nome; catAnterior = nome; dirty = true; recalc();
+      });
     });
     if ($('#dup-prod')) $('#dup-prod').addEventListener('click', function () {
       if (dirty) return toast('Salve o produto antes de duplicar', true);
