@@ -346,6 +346,8 @@
     S.impressoes = q(r[9]) || [];
     S.perdas = q(r[10]) || [];
     S.vendas = q(r[11]) || [];
+    var r13 = await sb.from('produtos').select('multicor').limit(1);
+    S.falta13 = !!r13.error;
     var r11 = await sb.from('produto_anuncios').select('arquivado').limit(1);
     S.falta11 = !!r11.error;
     var rc = await sb.from('carreteis').select('*');
@@ -401,6 +403,9 @@
     m.addEventListener('click', function (e) { var b = e.target.closest('[data-x]'); if (!b) return; if (b.dataset.x === 'close') closeModal(); else salvar(); });
     $('#nc-nome', m).addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); salvar(); } });
   }
+  function caixas() { return S.insumos.filter(function (i) { return i.e_caixa; }); }
+  function medCaixa(i) { return i && num(i.caixa_c) && num(i.caixa_l) && num(i.caixa_a) ? fmt(num(i.caixa_c)) + ' × ' + fmt(num(i.caixa_l)) + ' × ' + fmt(num(i.caixa_a)) + ' cm' : ''; }
+  function wMedioImpressoras() { var ws = impressoras().filter(function (e) { return e.status === 'ativo'; }).map(function (e) { return num(e.potencia_w); }).filter(Boolean); return ws.length ? Math.round(ws.reduce(function (a, b) { return a + b; }, 0) / ws.length) : 120; }
   function categorias() { return (S.cfg && S.cfg.categorias && S.cfg.categorias.length) ? S.cfg.categorias : ['Decoração', 'Chaveiros', 'Expositores', 'Gamer', 'Brinquedos', 'Utilidades', 'Acessórios']; }
   function tiposFilamento() {
     var base = ['PLA', 'PETG', 'PLA Silk', 'PLA Matte', 'ABS', 'TPU'];
@@ -440,7 +445,7 @@
       var cg = custoGrama(p.material);
       c.linhas.push(['Filamento (' + fmt(g || 0, 1) + ' g × ' + brl(cg.v).replace('R$ ', 'R$ ') + '/g)', (g || 0) * cg.v]);
       var imp = byId(S.equipamentos, p.impressora_padrao);
-      var w = (imp && num(imp.potencia_w)) || 120;
+      var w = (imp && num(imp.potencia_w)) || wMedioImpressoras();
       var kwh = num(cfg.kwh) || 0;
       c.linhas.push(['Energia (' + horas(t) + ' · ' + w + ' W)', (w / 1000) * ((t || 0) / 60) * kwh]);
       if (p.usa_hora_maquina) c.linhas.push(['Hora-máquina (' + brl(num(cfg.hora_maquina) || 0) + '/h)', ((t || 0) / 60) * (num(cfg.hora_maquina) || 0)]);
@@ -451,6 +456,8 @@
       var qt = num(it.quantidade) || 0;
       c.linhas.push([ins.nome + (qt !== 1 ? ' × ' + fmt(qt) : ''), qt * (num(ins.custo_unitario) || 0)]);
     });
+    var cx = p.caixa_id && byId(S.insumos, p.caixa_id);
+    if (cx && !itensInsumo.some(function (it) { return it.insumo_id === cx.id; })) c.linhas.push(['Caixa: ' + cx.nome, num(cx.custo_unitario) || 0]);
     c.linhas.forEach(function (l) { c.total += l[1]; });
     var margem = num(cfg.margem_pct); if (margem === null) margem = 200;
     c.sugerido = arred(c.total * (1 + margem / 100));
@@ -718,7 +725,7 @@
     var cfg = S.cfg || {};
     var p = orig ? JSON.parse(JSON.stringify(orig)) : {
       id: uid(), nome: '', categoria: categorias()[0], tipo_produto: 'impresso', ativo: true, mostrar_no_site: true, destaque: false,
-      usa_hora_maquina: true, estoque: 0, fotos: [], opcoes: [], videos: [], material: 'PLA', acabamento_faixa: (cfg.faixas_acabamento || [])[0] || null
+      usa_hora_maquina: true, estoque: 0, fotos: [], opcoes: [], videos: [], material: '', acabamento_faixa: (cfg.faixas_acabamento || [])[0] || null
     };
     var itens = S.prodInsumos.filter(function (x) { return x.produto_id === p.id; }).map(function (x) { return { insumo_id: x.insumo_id, quantidade: x.quantidade }; });
 
@@ -741,14 +748,15 @@
     var fTextos = [
       { k: 'descricao_breve', label: 'Descrição breve (aparece no cartão do site)', type: 'textarea', rows: 2, span: 2 },
       { k: 'descricao', label: 'Descrição completa', type: 'textarea', rows: 7, span: 2 },
-      { k: 'medidas', label: 'Medidas', ph: 'ex.: 10 × 16 cm' },
+      { k: 'medidas', label: 'Medidas da peça', ph: 'ex.: 10 × 16 cm' },
+      { k: 'caixa_id', label: 'Caixa de envio', type: 'select', opts: [{ v: '', t: '— sem caixa —' }].concat(caixas().map(function (i) { return { v: i.id, t: i.nome + (medCaixa(i) ? ' · ' + medCaixa(i) : '') + ' · ' + brl(num(i.custo_unitario) || 0) }; })) },
       { k: 'peso_g', label: 'Peso da peça pronta (g)', type: 'num' }
     ];
     var printerOpts = [{ v: '', t: '— escolher —' }].concat(impressoras().map(function (e) { return { v: e.id, t: e.nome }; }));
     var fProd = [
-      { k: 'material', label: 'Material', list: tiposFilamento() },
-      { k: 'gramas', label: 'Filamento por unidade (g)', type: 'num', hint: 'Do fatiador (Bambu, Orca, Anycubic)' },
-      { k: 'impressora_padrao', label: 'Impressora', type: 'select', opts: printerOpts },
+      { k: 'material', label: 'Material', list: tiposFilamento(), ph: 'ex.: PLA' },
+      { k: 'gramas', label: 'Filamento gasto com purgas (g)', type: 'num', hint: 'Total por unidade, já com as purgas (do fatiador)' },
+      { k: 'multicor', label: 'Multicor', type: 'select', opts: [{ v: 'nao', t: 'Não' }, { v: 'sim', t: 'Sim' }] },
       { k: 'acabamento_faixa', label: 'Tempo de acabamento', type: 'select', opts: [{ v: '', t: '—' }].concat(cfg.faixas_acabamento || []) },
       { k: 'acabamento_tarefas', label: 'O que precisa ser feito no acabamento', type: 'textarea', rows: 2, span: 2, ph: 'ex.: tirar suportes, lixar a base, colar a argola' }
     ];
@@ -770,14 +778,15 @@
       '<div class="card"><div class="row between"><h2 style="margin:0">Fotos</h2><span class="small muted">A primeira é a capa. Dá para escolher, arrastar ou colar um print (Ctrl+V).</span></div><div class="photos" id="photos" style="margin-top:12px"></div>' +
       '<input type="file" id="photo-in" accept="image/*" multiple class="hidden"></div>' +
       // textos
-      '<div class="card"><h2>Textos e detalhes</h2><div class="grid g2">' + fTextos.map(function (f) { return fieldHtml(f, p[f.k]); }).join('') +
+      '<div class="card"><h2>Textos e detalhes</h2><div class="grid g2">' + fTextos.slice(0, 2).map(function (f) { return fieldHtml(f, p[f.k]); }).join('') +
+      '<div class="grid g3" style="grid-column:1 / -1">' + fieldHtml(fTextos[2], p.medidas) + (S.falta13 ? '<div class="field"><label>Caixa de envio</label><div class="hint">Rode o script 13 para escolher a caixa.</div></div>' : '<div>' + fieldHtml(fTextos[3], p.caixa_id || '') + '<div class="hint">' + (caixas().length ? 'O custo da caixa entra no custo do produto.' : 'Cadastre as caixas em <a href="#/insumos">Insumos e extras</a> (marque “É caixa de envio”).') + '</div></div>') + fieldHtml(fTextos[4], p.peso_g) + '</div>' +
       '<div class="field" style="grid-column:span 2"><label for="opcoes">Opções para o cliente escolher</label><textarea class="inp" id="opcoes" rows="2" placeholder="Cor: Branco, Preto">' + esc(opcoesParaTexto(p.opcoes)) + '</textarea><div class="hint">Uma por linha, no formato "Nome: opção 1, opção 2".</div></div>' +
       '</div></div>' +
       // produção
       '<div class="card" id="box-impresso"><h2>Produção</h2><div class="grid g4">' +
       fieldHtml(fProd[0], p.material) + fieldHtml(fProd[1], p.gramas) +
       '<div class="field"><label for="th">Tempo de impressão</label><div class="row" style="gap:6px"><input class="inp" id="th" inputmode="numeric" value="' + esc(tempoH) + '" aria-label="horas"><span class="muted">h</span><input class="inp" id="tm" inputmode="numeric" value="' + esc(tempoM) + '" aria-label="minutos"><span class="muted">min</span></div><div class="hint">Por unidade</div></div>' +
-      fieldHtml(fProd[2], p.impressora_padrao || '') +
+      fieldHtml(fProd[2], p.multicor ? 'sim' : 'nao') +
       fieldHtml(fProd[3], p.acabamento_faixa || '') + fieldHtml(fProd[4], p.acabamento_tarefas) +
       '<div style="grid-column:span 1;align-self:end">' + fieldHtml({ k: 'usa_hora_maquina', label: 'Cobrar hora-máquina', type: 'check' }, p.usa_hora_maquina) + '</div>' +
       '</div></div>' +
@@ -814,7 +823,9 @@
       o.tempo_min = (h || m) ? Math.round(h * 60 + m) : null;
       o.opcoes = textoParaOpcoes($('#opcoes').value);
       o.estoque = Math.max(0, Math.round(num($('#estoque').value) || 0));
-      o.impressora_padrao = o.impressora_padrao || null;
+      o.multicor = o.multicor === 'sim';
+      o.caixa_id = o.caixa_id || null;
+      if (S.falta13) { delete o.multicor; delete o.caixa_id; }
       o.acabamento_faixa = o.acabamento_faixa || null;
       return o;
     }
@@ -1294,6 +1305,10 @@
     { k: 'qtd_pacote', label: 'Unidades', type: 'num', ph: 'ex.: 100', hint: 'Quantas vêm no pacote' },
     { k: 'custo_unitario', label: 'Custo por unidade (R$)', type: 'num', hint: 'Calculado sozinho, arredondado para cima' },
     { k: 'estoque', label: 'Em estoque', type: 'num', hint: 'Quantas você tem agora' },
+    { k: 'e_caixa', label: 'É caixa de envio', type: 'check' },
+    { k: 'caixa_c', label: 'Comprimento (cm)', type: 'num' },
+    { k: 'caixa_l', label: 'Largura (cm)', type: 'num' },
+    { k: 'caixa_a', label: 'Altura (cm)', type: 'num' },
     { k: 'link_compra', label: 'Link de compra', span: 4, ph: 'cole o link aqui' },
     { k: 'observacoes', label: 'Observações', type: 'textarea', rows: 2, span: 4 }
   ];
@@ -1318,7 +1333,7 @@
         var comprar = '<div class="row wrap" style="gap:6px">' + (isUrl(i.link_compra) ? '<a href="' + esc(i.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + i.id + '">+ Colar link</button>') +
           '<button type="button" class="btn btn-g btn-s" data-preco-ins="' + i.id + '" title="Pesquisar preço nas lojas">🔎 Preço</button></div>';
         return '<tr><td style="width:58px">' + thumbHtml(i.foto) + '</td>' +
-          '<td><div style="font-weight:700">' + esc(i.nome) + '</div>' + (pac && num(i.preco_pacote) ? '<div class="small muted">pacote de ' + fmt(pac) + ' por ' + brl(num(i.preco_pacote)) + '</div>' : '') +
+          '<td><div style="font-weight:700">' + esc(i.nome) + (i.e_caixa ? ' <span class="pill p-info">📦 caixa' + (medCaixa(i) ? ' ' + esc(medCaixa(i)) : '') + '</span>' : '') + '</div>' + (pac && num(i.preco_pacote) ? '<div class="small muted">pacote de ' + fmt(pac) + ' por ' + brl(num(i.preco_pacote)) + '</div>' : '') +
           '<div class="show-m small" style="margin-top:6px">Custo: <b>' + brl(centavoAcima(num(i.custo_unitario))) + '</b> cada' + (pac ? ' · comprei ' + fmt(pac) : '') + '<div style="margin-top:6px">Estoque: ' + estoqueHtml + '</div><div style="margin-top:6px">' + comprar + '</div></div></td>' +
           '<td class="num hide-m">' + brl(centavoAcima(num(i.custo_unitario))) + '</td>' +
           '<td class="num hide-m">' + (pac ? fmt(pac) : '—') + '</td>' +
@@ -1382,6 +1397,10 @@
       '<div class="hint" id="ins-calc"></div>' +
       '<div class="row">' + (id ? '<button class="btn btn-d" data-x="del">Excluir</button>' : '') + '<div class="grow"></div><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Salvar</button></div>');
     ligarFotoUnica(m, foto, 'insumos/' + novoId);
+    var cxCampos = ['caixa_c', 'caixa_l', 'caixa_a'].map(function (k) { return $('[data-k="' + k + '"]', m).closest('.field'); });
+    var elCx = $('[data-k="e_caixa"]', m);
+    if (S.falta13) { elCx.closest('label').classList.add('hidden'); cxCampos.forEach(function (f) { f.classList.add('hidden'); }); }
+    else { var verCx = function () { cxCampos.forEach(function (f) { f.classList.toggle('hidden', !elCx.checked); }); }; elCx.addEventListener('change', verCx); verCx(); }
     var elPac = $('[data-k="preco_pacote"]', m), elQtd = $('[data-k="qtd_pacote"]', m), elUni = $('[data-k="custo_unitario"]', m), elEst = $('[data-k="estoque"]', m);
     var calc = $('#ins-calc', m);
     function doPacote() {
@@ -1412,6 +1431,8 @@
           if (o.estoque === null) o.estoque = 0;
           o.unidade = 'un';
           o.id = novoId;
+          if (S.falta13) { delete o.e_caixa; delete o.caixa_c; delete o.caixa_l; delete o.caixa_a; }
+          else if (!o.e_caixa) { o.caixa_c = null; o.caixa_l = null; o.caixa_a = null; }
           if (foto.mudou || foto.foto) o.foto = foto.foto;
           var r = q(await sb.from('insumos').upsert(o).select().single());
           S.insumos = S.insumos.filter(function (x) { return x.id !== r.id; }).concat([r]).sort(function (x, y) { return x.nome.localeCompare(y.nome); });
@@ -3156,7 +3177,8 @@
     var preco = num(a.preco) || precoPlataforma(num(p.preco), pl) || num(p.preco);
     var pesoG = num(p.peso_g);
     var fotos = (p.fotos || []).filter(isUrl).slice(0, 9);
-    var med = medidasCm(p.medidas);
+    var cxS = p.caixa_id && byId(S.insumos, p.caixa_id);
+    var med = cxS && medCaixa(cxS) ? [num(cxS.caixa_c), num(cxS.caixa_l), num(cxS.caixa_a)].map(function (n) { return Math.max(1, Math.ceil(n)); }) : medidasCm(p.medidas);
     var r = {
       nome: (a.titulo || p.nome || '').trim(), descricao: (a.descricao || '').trim(), sku: 'CA-' + String(a.id).replace(/-/g, '').slice(0, 10).toUpperCase(),
       preco: preco ? Math.round(preco * 100) / 100 : null, estoque: p.estoque > 0 ? p.estoque : opc.estoqueEnc,
