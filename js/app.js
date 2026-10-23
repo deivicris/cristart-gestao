@@ -780,6 +780,7 @@
       // textos
       '<div class="card"><h2>Textos e detalhes</h2><div class="grid g2">' + fTextos.slice(0, 2).map(function (f) { return fieldHtml(f, p[f.k]); }).join('') +
       '<div class="grid g3" style="grid-column:1 / -1">' + fieldHtml(fTextos[2], p.medidas) + (S.falta13 ? '<div class="field"><label>Caixa de envio</label><div class="hint">Rode o script 13 para escolher a caixa.</div></div>' : '<div>' + fieldHtml(fTextos[3], p.caixa_id || '') + '<div class="hint">' + (caixas().length ? 'O custo da caixa entra no custo do produto.' : 'Cadastre as caixas em <a href="#/insumos">Insumos e extras</a> (marque “É caixa de envio”).') + '</div></div>') + fieldHtml(fTextos[4], p.peso_g) + '</div>' +
+      '<div class="field" style="grid-column:span 2"><label for="videos">Vídeos (Instagram, TikTok ou YouTube)</label><textarea class="inp" id="videos" rows="2" placeholder="Cole o link do post, um por linha. ex.: https://www.instagram.com/reel/…">' + esc((p.videos || []).join('\n')) + '</textarea><div class="hint" id="videos-hint">Aparecem no site junto das fotos, e dá para assistir ali mesmo.</div></div>' +
       '<div class="field" style="grid-column:span 2"><label for="opcoes">Opções para o cliente escolher</label><textarea class="inp" id="opcoes" rows="2" placeholder="Cor: Branco, Preto">' + esc(opcoesParaTexto(p.opcoes)) + '</textarea><div class="hint">Uma por linha, no formato "Nome: opção 1, opção 2".</div></div>' +
       '</div></div>' +
       // produção
@@ -830,6 +831,11 @@
       return o;
     }
     function atual() { var o = lerForm(); o.id = p.id; return o; }
+    function lerVideos() { return $('#videos').value.split(/\s+/).map(function (u) { return u.trim(); }).filter(isUrl); }
+    $('#videos').addEventListener('input', function () {
+      var curtos = lerVideos().filter(function (u) { return /vm\.tiktok\.com|vt\.tiktok\.com|tiktok\.com\/t\//i.test(u) || (/tiktok\.com/i.test(u) && !/\/video\/\d+/.test(u)); });
+      $('#videos-hint').innerHTML = curtos.length ? '<span style="color:var(--warn);font-weight:700">Link curto do TikTok não toca dentro do site.</span> Abra o vídeo no navegador e copie o endereço completo (com /video/ e números).' : 'Aparecem no site junto das fotos, e dá para assistir ali mesmo.';
+    });
 
     // fotos
     function drawPhotos() {
@@ -976,7 +982,7 @@
       var o = atual();
       if (!o.nome) { toast('Dê um nome ao produto', true); $('[data-k="nome"]').focus(); return; }
       o.fotos = p.fotos;
-      o.videos = p.videos || [];
+      o.videos = lerVideos();
       if (orig) o.codigo_site = orig.codigo_site;
       var btn = $('#save'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Salvando…';
       try {
