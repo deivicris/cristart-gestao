@@ -245,3 +245,8 @@ img.zoomable,.photo img,.foto-uni img{cursor:zoom-in}
 .ft-via{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--surface-2)}
 .ft-drop{display:flex;align-items:center;gap:14px;padding:22px;border:2px dashed var(--line-strong);border-radius:14px;cursor:pointer;color:var(--ink-soft);background:var(--surface-2)}
 .ft-drop.drop-on,.ft-drop:hover{border-color:var(--craft);color:var(--ink)}
+.inp-s{padding:6px 8px;min-height:34px;font-size:13.5px;width:auto}
+.inp-preco{width:92px;text-align:right}
+.passo{display:inline-flex;align-items:center;gap:6px}
+.passo .icon-btn{width:30px;height:30px;font-size:16px;font-weight:800}
+.passo b{min-width:22px;text-align:center}

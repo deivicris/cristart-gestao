@@ -693,15 +693,49 @@
           return '<tr class="click" data-href="#/produto/' + p.id + '">' +
             '<td style="width:58px">' + thumbHtml(p.fotos && p.fotos[0], p.fotos) + '</td>' +
             '<td><div style="font-weight:700">' + esc(p.nome) + '</div><div class="small muted">' + (p.tipo_produto === 'revenda' ? 'Revenda' : (esc(p.material || '') + (p.tempo_min ? ' · ' + horas(p.tempo_min) : ''))) + '</div>' +
-            '<div class="show-m small" style="margin-top:4px">' + site + ' <span class="muted">estoque ' + (p.estoque || 0) + '</span>' + (c.avisos.length ? ' <span class="pill p-warn">custo incompleto</span>' : ' <span class="muted">· lucro ' + brl(l) + '</span>') + '</div></td>' +
-            '<td class="hide-m">' + esc(p.categoria || '—') + '</td>' +
+            '<div class="show-m small" style="margin-top:6px">' + passoEst(p) + '</div><div class="show-m small" style="margin-top:4px">' + site + (c.avisos.length ? ' <span class="pill p-warn">custo incompleto</span>' : ' <span class="muted">· lucro ' + brl(l) + '</span>') + '</div></td>' +
+            '<td class="hide-m inline-ed"><select class="inp inp-s" data-pcat="' + p.id + '" aria-label="Categoria de ' + esc(p.nome) + '">' + categorias().concat(p.categoria && categorias().indexOf(p.categoria) < 0 ? [p.categoria] : []).map(function (k) { return '<option' + (k === p.categoria ? ' selected' : '') + '>' + esc(k) + '</option>'; }).join('') + (p.categoria ? '' : '<option value="" selected>—</option>') + '<option value="__nova">➕ Nova categoria…</option></select></td>' +
             '<td class="num hide-m">' + brl(c.total) + (c.avisos.length ? '<div><span class="pill p-warn" title="' + esc(c.avisos.join(', ')) + '">incompleto</span></div>' : '') + '</td>' +
-            '<td class="num">' + brl(preco) + '</td>' +
+            '<td class="num inline-ed"><input class="inp inp-s inp-preco" data-ppreco="' + p.id + '" inputmode="decimal" value="' + esc(preco ? fmtIn(preco.toFixed(2)) : '') + '" placeholder="—" aria-label="Preço Pix de ' + esc(p.nome) + '"></td>' +
             '<td class="num hide-m" style="color:' + (l !== null && l < 0 ? 'var(--bad)' : 'var(--ok)') + ';font-weight:700">' + brl(l) + '</td>' +
-            '<td class="num hide-m">' + (p.estoque || 0) + '</td>' +
+            '<td class="num hide-m inline-ed">' + passoEst(p) + '</td>' +
             '<td class="hide-m">' + site + '</td></tr>';
         }).join('') + '</tbody></table>';
     }
+    function passoEst(p) { return '<span class="passo inline-ed"><button type="button" class="icon-btn" data-pest="' + p.id + ':-1" aria-label="Tirar 1 do estoque">−</button><b data-pest-v="' + p.id + '">' + (p.estoque || 0) + '</b><button type="button" class="icon-btn" data-pest="' + p.id + ':1" aria-label="Pôr 1 no estoque">+</button></span>'; }
+    var timers = {};
+    async function salvarCampo(id, patch, msg) {
+      try {
+        var r = q(await sb.from('produtos').update(patch).eq('id', id).select().single());
+        S.produtos = S.produtos.map(function (x) { return x.id === r.id ? r : x; });
+        if (msg) toast(msg);
+        return r;
+      } catch (err) { toast('Não salvou: ' + erroMsg(err), true); draw(); }
+    }
+    $('#plist').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-pest]'); if (!b) return;
+      var pr = b.dataset.pest.split(':'), p = byId(S.produtos, pr[0]);
+      p.estoque = Math.max(0, (p.estoque || 0) + (+pr[1]));
+      $$('[data-pest-v="' + p.id + '"]').forEach(function (el) { el.textContent = p.estoque; });
+      clearTimeout(timers[p.id]);
+      timers[p.id] = setTimeout(function () { salvarCampo(p.id, { estoque: p.estoque }, 'Estoque de “' + p.nome + '”: ' + p.estoque).then(function () { draw(); }); }, 700);
+    });
+    $('#plist').addEventListener('change', async function (e) {
+      var c = e.target.closest('[data-pcat]');
+      if (c) {
+        var id = c.dataset.pcat, ant = (byId(S.produtos, id) || {}).categoria || '';
+        if (c.value === '__nova') { c.value = ant; return novaCategoria(function (nome) { salvarCampo(id, { categoria: nome }, 'Categoria salva ✓').then(function () { draw(); }); }); }
+        return salvarCampo(id, { categoria: c.value || null }, 'Categoria salva ✓');
+      }
+      var pp = e.target.closest('[data-ppreco]');
+      if (pp) {
+        var v2 = num(pp.value);
+        if (pp.value.trim() && (v2 === null || v2 < 0)) { toast('Preço inválido', true); return draw(); }
+        await salvarCampo(pp.dataset.ppreco, { preco: v2 }, 'Preço salvo ✓');
+        draw();
+      }
+    });
+    $('#plist').addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target.matches('[data-ppreco]')) { e.preventDefault(); e.target.blur(); } });
     $('#pb').addEventListener('input', function (e) { S.ui.prodBusca = e.target.value; draw(); });
     $('#pc').addEventListener('change', function (e) { S.ui.prodCat = e.target.value; draw(); });
     $('#ps').addEventListener('change', function (e) { S.ui.prodStatus = e.target.value; draw(); });
@@ -3588,7 +3622,7 @@
   // clique em linhas de tabela com data-href
   document.addEventListener('click', function (e) {
     var tr = e.target.closest('tr[data-href]');
-    if (tr && !e.target.closest('a,button,input,select,label')) go(tr.dataset.href);
+    if (tr && !e.target.closest('a,button,input,select,label,.inline-ed')) go(tr.dataset.href);
   });
 
   // ------------------------------------------------------------------ LOGIN
