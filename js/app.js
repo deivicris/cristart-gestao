@@ -346,6 +346,8 @@
     S.impressoes = q(r[9]) || [];
     S.perdas = q(r[10]) || [];
     S.vendas = q(r[11]) || [];
+    var r14 = await sb.from('insumos').select('formato').limit(1);
+    S.falta14 = !!r14.error;
     var r13 = await sb.from('produtos').select('multicor').limit(1);
     S.falta13 = !!r13.error;
     var r11 = await sb.from('produto_anuncios').select('arquivado').limit(1);
@@ -403,8 +405,10 @@
     m.addEventListener('click', function (e) { var b = e.target.closest('[data-x]'); if (!b) return; if (b.dataset.x === 'close') closeModal(); else salvar(); });
     $('#nc-nome', m).addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); salvar(); } });
   }
-  function caixas() { return S.insumos.filter(function (i) { return i.e_caixa; }); }
-  function medCaixa(i) { return i && num(i.caixa_c) && num(i.caixa_l) && num(i.caixa_a) ? fmt(num(i.caixa_c)) + ' × ' + fmt(num(i.caixa_l)) + ' × ' + fmt(num(i.caixa_a)) + ' cm' : ''; }
+  function formatoDe(i) { return i ? (i.formato || (i.e_caixa ? 'caixa' : null)) : null; }
+  function caixas(tipo) { return S.insumos.filter(function (i) { var f = formatoDe(i); return f && (!tipo || f === tipo); }); }
+  function eEmbalagem(i) { return !!(i && (i.embalagem || formatoDe(i))); }
+  function medCaixa(i) { if (!i || !num(i.caixa_c) || !num(i.caixa_l)) return ''; return fmt(num(i.caixa_c)) + ' × ' + fmt(num(i.caixa_l)) + (formatoDe(i) === 'caixa' && num(i.caixa_a) ? ' × ' + fmt(num(i.caixa_a)) : '') + ' cm'; }
   function wMedioImpressoras() { var ws = impressoras().filter(function (e) { return e.status === 'ativo'; }).map(function (e) { return num(e.potencia_w); }).filter(Boolean); return ws.length ? Math.round(ws.reduce(function (a, b) { return a + b; }, 0) / ws.length) : 120; }
   function categorias() { return (S.cfg && S.cfg.categorias && S.cfg.categorias.length) ? S.cfg.categorias : ['Decoração', 'Chaveiros', 'Expositores', 'Gamer', 'Brinquedos', 'Utilidades', 'Acessórios']; }
   function tiposFilamento() {
@@ -457,7 +461,7 @@
       c.linhas.push([ins.nome + (qt !== 1 ? ' × ' + fmt(qt) : ''), qt * (num(ins.custo_unitario) || 0)]);
     });
     var cx = p.caixa_id && byId(S.insumos, p.caixa_id);
-    if (cx && !itensInsumo.some(function (it) { return it.insumo_id === cx.id; })) c.linhas.push(['Caixa: ' + cx.nome, num(cx.custo_unitario) || 0]);
+    if (cx && !itensInsumo.some(function (it) { return it.insumo_id === cx.id; })) c.linhas.push([(formatoDe(cx) === 'envelope' ? 'Envelope: ' : 'Caixa: ') + cx.nome, num(cx.custo_unitario) || 0]);
     c.linhas.forEach(function (l) { c.total += l[1]; });
     var margem = num(cfg.margem_pct); if (margem === null) margem = 200;
     c.sugerido = arred(c.total * (1 + margem / 100));
@@ -779,7 +783,7 @@
       '<input type="file" id="photo-in" accept="image/*" multiple class="hidden"></div>' +
       // textos
       '<div class="card"><h2>Textos e detalhes</h2><div class="grid g2">' + fTextos.slice(0, 2).map(function (f) { return fieldHtml(f, p[f.k]); }).join('') +
-      '<div class="grid g3" style="grid-column:1 / -1">' + fieldHtml(fTextos[2], p.medidas) + (S.falta13 ? '<div class="field"><label>Caixa de envio</label><div class="hint">Rode o script 13 para escolher a caixa.</div></div>' : '<div>' + fieldHtml(fTextos[3], p.caixa_id || '') + '<div class="hint">' + (caixas().length ? 'O custo da caixa entra no custo do produto.' : 'Cadastre as caixas em <a href="#/insumos">Insumos e extras</a> (marque “É caixa de envio”).') + '</div></div>') + fieldHtml(fTextos[4], p.peso_g) + '</div>' +
+      '<div class="grid g2" style="grid-column:1 / -1">' + fieldHtml(fTextos[2], p.medidas) + fieldHtml(fTextos[4], p.peso_g) + '</div>' +
       '<div class="field" style="grid-column:span 2"><label for="videos">Vídeos (Instagram, TikTok ou YouTube)</label><textarea class="inp" id="videos" rows="2" placeholder="Cole o link do post, um por linha. ex.: https://www.instagram.com/reel/…">' + esc((p.videos || []).join('\n')) + '</textarea><div class="hint" id="videos-hint">Aparecem no site junto das fotos, e dá para assistir ali mesmo.</div></div>' +
       '<div class="field" style="grid-column:span 2"><label for="opcoes">Opções para o cliente escolher</label><textarea class="inp" id="opcoes" rows="2" placeholder="Cor: Branco, Preto">' + esc(opcoesParaTexto(p.opcoes)) + '</textarea><div class="hint">Uma por linha, no formato "Nome: opção 1, opção 2".</div></div>' +
       '</div></div>' +
@@ -791,6 +795,12 @@
       fieldHtml(fProd[3], p.acabamento_faixa || '') + fieldHtml(fProd[4], p.acabamento_tarefas) +
       '<div style="grid-column:span 1;align-self:end">' + fieldHtml({ k: 'usa_hora_maquina', label: 'Cobrar hora-máquina', type: 'check' }, p.usa_hora_maquina) + '</div>' +
       '</div></div>' +
+      // embalagem de envio
+      '<div class="card"><div class="row between wrap"><h2 style="margin:0">📦 Embalagem de envio</h2><a class="small" href="#/insumos">Cadastrar caixas, envelopes e plástico bolha</a></div>' +
+      (S.falta13 ? '<div class="note" style="margin-top:10px">Rode os scripts 13 e 14 para usar a embalagem de envio.</div>' :
+      '<div class="grid g3" style="margin-top:10px"><div class="field"><label for="env-tipo">Vai em</label><select class="inp" id="env-tipo"><option value="">— escolher —</option><option value="caixa">Caixa</option><option value="envelope">Envelope / pacote</option></select></div>' +
+      '<div class="field" style="grid-column:span 2"><label for="fld-caixa_id">Qual</label><select class="inp" id="fld-caixa_id" data-k="caixa_id"></select><div class="hint" id="env-hint"></div></div></div>' +
+      '<div class="row between wrap" style="margin-top:6px"><span class="lbl">Junto vai também (proteção, etiquetas…)</span><button type="button" class="btn btn-g btn-s" id="add-emb">+ Adicionar item</button></div><div id="emb-list" style="margin-top:8px"></div>') + '</div>' +
       '<div class="card hidden" id="box-revenda"><h2>Revenda</h2><div class="grid g4">' + fieldHtml(fRevenda[0], p.custo_compra) + '</div></div>' +
       // insumos
       '<div class="card"><div class="row between"><h2 style="margin:0">Insumos e extras usados</h2>' +
@@ -875,30 +885,58 @@
     });
 
     // insumos
+    var deEmb = function (it) { return eEmbalagem(byId(S.insumos, it.insumo_id)); };
+    function linhaIns(it, i, lista) {
+      var ins0 = byId(S.insumos, it.insumo_id);
+      return '<div class="row"><select class="inp grow" data-ins="sel" data-i="' + i + '">' + lista.map(function (ins) {
+        return '<option value="' + ins.id + '"' + (ins.id === it.insumo_id ? ' selected' : '') + '>' + esc(ins.nome) + ' (' + brl(num(ins.custo_unitario)) + '/' + un(ins) + ')</option>';
+      }).join('') + '</select><input class="inp" data-ins="qt" data-i="' + i + '" inputmode="decimal" value="' + esc(fmtIn(it.quantidade)) + '" style="width:80px" aria-label="Quantidade"><span class="small muted" style="width:22px">' + esc(un(ins0)) + '</span>' +
+        '<button type="button" class="icon-btn" data-ins="del" data-i="' + i + '" aria-label="Remover item">✕</button></div>';
+    }
     function drawIns() {
-      if (!itens.length) { $('#ins-list').innerHTML = '<div class="small muted">Nenhum. Ex.: argola de chaveiro, embalagem, card de agradecimento.</div>'; return; }
-      $('#ins-list').innerHTML = '<div class="stack" style="gap:8px">' + itens.map(function (it, i) {
-        return '<div class="row"><select class="inp grow" data-ins="sel" data-i="' + i + '">' + S.insumos.map(function (ins) {
-          return '<option value="' + ins.id + '"' + (ins.id === it.insumo_id ? ' selected' : '') + '>' + esc(ins.nome) + ' (' + brl(num(ins.custo_unitario)) + ')</option>';
-        }).join('') + '</select><input class="inp" data-ins="qt" data-i="' + i + '" inputmode="decimal" value="' + esc(fmtIn(it.quantidade)) + '" style="width:80px" aria-label="Quantidade">' +
-          '<button type="button" class="icon-btn" data-ins="del" data-i="' + i + '" aria-label="Remover insumo">✕</button></div>';
-      }).join('') + '</div>';
+      var prod = S.insumos.filter(function (x) { return !eEmbalagem(x); }), acess = S.insumos.filter(function (x) { return eEmbalagem(x) && !formatoDe(x); });
+      var lp = [], le = [];
+      itens.forEach(function (it, i) { if (deEmb(it) && $('#emb-list')) le.push(linhaIns(it, i, acess.length ? acess : S.insumos)); else lp.push(linhaIns(it, i, prod.length ? prod : S.insumos)); });
+      $('#ins-list').innerHTML = lp.length ? '<div class="stack" style="gap:8px">' + lp.join('') + '</div>' : '<div class="small muted">Nenhum. Ex.: argola de chaveiro, ímã, card de agradecimento.</div>';
+      if ($('#emb-list')) $('#emb-list').innerHTML = le.length ? '<div class="stack" style="gap:8px">' + le.join('') + '</div>' : '<div class="small muted">Nada. Ex.: 0,5 m de plástico bolha, 1 etiqueta de frágil.</div>';
+    }
+    function drawEnvio() {
+      var sel = $('#fld-caixa_id'); if (!sel) return;
+      var tipo = $('#env-tipo').value, l = caixas(tipo || null), atual = sel.value || p.caixa_id || '';
+      sel.innerHTML = '<option value="">— nenhuma —</option>' + l.map(function (i) { return '<option value="' + i.id + '"' + (i.id === atual ? ' selected' : '') + '>' + esc(i.nome + (medCaixa(i) ? ' · ' + medCaixa(i) : '') + ' · ' + brl(num(i.custo_unitario) || 0)) + '</option>'; }).join('');
+      $('#env-hint').innerHTML = l.length ? 'O custo entra no custo do produto; as medidas vão para a planilha da Shopee.' : 'Nenhuma ' + (tipo === 'envelope' ? 'embalagem tipo envelope' : 'caixa') + ' cadastrada. Cadastre em <a href="#/insumos">Insumos e extras</a> marcando “É material de embalagem”.';
+    }
+    if ($('#env-tipo')) {
+      var cx0 = byId(S.insumos, p.caixa_id);
+      $('#env-tipo').value = formatoDe(cx0) || (caixas('envelope').length && !caixas('caixa').length ? 'envelope' : 'caixa');
+      drawEnvio();
+      $('#env-tipo').addEventListener('change', function () { $('#fld-caixa_id').value = ''; drawEnvio(); dirty = true; recalc(); });
+      $('#add-emb').addEventListener('click', function () {
+        var acess = S.insumos.filter(function (x) { return eEmbalagem(x) && !formatoDe(x); });
+        if (!acess.length) return toast('Cadastre antes em Insumos e extras (ex.: plástico bolha, marcado como material de embalagem)', true);
+        var livre = acess.filter(function (ins) { return !itens.some(function (it) { return it.insumo_id === ins.id; }); })[0] || acess[0];
+        itens.push({ insumo_id: livre.id, quantidade: un(livre) === 'm' ? 0.5 : 1 }); dirty = true; drawIns(); recalc();
+      });
     }
     drawIns();
     if ($('#add-ins')) $('#add-ins').addEventListener('click', function () {
-      var livre = S.insumos.filter(function (ins) { return !itens.some(function (it) { return it.insumo_id === ins.id; }); })[0] || S.insumos[0];
+      var prod = S.insumos.filter(function (x) { return !eEmbalagem(x); }); if (!prod.length) prod = S.insumos;
+      var livre = prod.filter(function (ins) { return !itens.some(function (it) { return it.insumo_id === ins.id; }); })[0] || prod[0];
       itens.push({ insumo_id: livre.id, quantidade: 1 }); dirty = true; drawIns(); recalc();
     });
-    $('#ins-list').addEventListener('change', function (e) {
-      var el = e.target, i = +el.dataset.i; if (isNaN(i)) return;
+    var trataIns = function (e) {
+      var el = e.target, i = +el.dataset.i; if (!el.dataset.ins || isNaN(i)) return;
       if (el.dataset.ins === 'sel') itens[i].insumo_id = el.value;
       if (el.dataset.ins === 'qt') itens[i].quantidade = num(el.value) || 0;
+      if (el.dataset.ins === 'sel') drawIns();
       dirty = true; recalc();
-    });
-    $('#ins-list').addEventListener('click', function (e) {
+    };
+    var delIns = function (e) {
       var b = e.target.closest('[data-ins="del"]'); if (!b) return;
       itens.splice(+b.dataset.i, 1); dirty = true; drawIns(); recalc();
-    });
+    };
+    $('#ins-list').addEventListener('change', trataIns); $('#ins-list').addEventListener('click', delIns);
+    if ($('#emb-list')) { $('#emb-list').addEventListener('change', trataIns); $('#emb-list').addEventListener('click', delIns); }
 
     // anúncios (resumo; a edição fica na página de anúncios)
     function drawAds(preco) {
@@ -1311,7 +1349,9 @@
     { k: 'qtd_pacote', label: 'Unidades', type: 'num', ph: 'ex.: 100', hint: 'Quantas vêm no pacote' },
     { k: 'custo_unitario', label: 'Custo por unidade (R$)', type: 'num', hint: 'Calculado sozinho, arredondado para cima' },
     { k: 'estoque', label: 'Em estoque', type: 'num', hint: 'Quantas você tem agora' },
-    { k: 'e_caixa', label: 'É caixa de envio', type: 'check' },
+    { k: 'unidade', label: 'Usa por', type: 'select', opts: [{ v: 'un', t: 'Unidade (un)' }, { v: 'm', t: 'Metro (m) — rolos' }] },
+    { k: 'embalagem', label: 'É material de embalagem / envio', type: 'check' },
+    { k: 'formato', label: 'Formato', type: 'select', opts: [{ v: '', t: 'Acessório (bolha, etiqueta, fita…)' }, { v: 'caixa', t: 'Caixa' }, { v: 'envelope', t: 'Envelope / pacote' }] },
     { k: 'caixa_c', label: 'Comprimento (cm)', type: 'num' },
     { k: 'caixa_l', label: 'Largura (cm)', type: 'num' },
     { k: 'caixa_a', label: 'Altura (cm)', type: 'num' },
@@ -1339,7 +1379,7 @@
         var comprar = '<div class="row wrap" style="gap:6px">' + (isUrl(i.link_compra) ? '<a href="' + esc(i.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + i.id + '">+ Colar link</button>') +
           '<button type="button" class="btn btn-g btn-s" data-preco-ins="' + i.id + '" title="Pesquisar preço nas lojas">🔎 Preço</button></div>';
         return '<tr><td style="width:58px">' + thumbHtml(i.foto) + '</td>' +
-          '<td><div style="font-weight:700">' + esc(i.nome) + (i.e_caixa ? ' <span class="pill p-info">📦 caixa' + (medCaixa(i) ? ' ' + esc(medCaixa(i)) : '') + '</span>' : '') + '</div>' + (pac && num(i.preco_pacote) ? '<div class="small muted">pacote de ' + fmt(pac) + ' por ' + brl(num(i.preco_pacote)) + '</div>' : '') +
+          '<td><div style="font-weight:700">' + esc(i.nome) + (formatoDe(i) ? ' <span class="pill p-info">' + (formatoDe(i) === 'caixa' ? '📦 caixa' : '✉️ envelope') + (medCaixa(i) ? ' ' + esc(medCaixa(i)) : '') + '</span>' : (i.embalagem ? ' <span class="pill p-mut">embalagem</span>' : '')) + '</div>' + (pac && num(i.preco_pacote) ? '<div class="small muted">pacote de ' + fmt(pac) + ' por ' + brl(num(i.preco_pacote)) + '</div>' : '') +
           '<div class="show-m small" style="margin-top:6px">Custo: <b>' + brl(centavoAcima(num(i.custo_unitario))) + '</b> cada' + (pac ? ' · comprei ' + fmt(pac) : '') + '<div style="margin-top:6px">Estoque: ' + estoqueHtml + '</div><div style="margin-top:6px">' + comprar + '</div></div></td>' +
           '<td class="num hide-m">' + brl(centavoAcima(num(i.custo_unitario))) + '</td>' +
           '<td class="num hide-m">' + (pac ? fmt(pac) : '—') + '</td>' +
@@ -1403,10 +1443,26 @@
       '<div class="hint" id="ins-calc"></div>' +
       '<div class="row">' + (id ? '<button class="btn btn-d" data-x="del">Excluir</button>' : '') + '<div class="grow"></div><button class="btn btn-g" data-x="close">Cancelar</button><button class="btn btn-p" data-x="save">Salvar</button></div>');
     ligarFotoUnica(m, foto, 'insumos/' + novoId);
-    var cxCampos = ['caixa_c', 'caixa_l', 'caixa_a'].map(function (k) { return $('[data-k="' + k + '"]', m).closest('.field'); });
-    var elCx = $('[data-k="e_caixa"]', m);
-    if (S.falta13) { elCx.closest('label').classList.add('hidden'); cxCampos.forEach(function (f) { f.classList.add('hidden'); }); }
-    else { var verCx = function () { cxCampos.forEach(function (f) { f.classList.toggle('hidden', !elCx.checked); }); }; elCx.addEventListener('change', verCx); verCx(); }
+    var campo = function (k) { var el = $('[data-k="' + k + '"]', m); return el ? (el.closest('.field') || el.closest('label')) : null; };
+    var elEmb = $('[data-k="embalagem"]', m), elFmt = $('[data-k="formato"]', m), elUn = $('[data-k="unidade"]', m);
+    if (!id && !it.embalagem && it.e_caixa) elEmb.checked = true;
+    if (formatoDe(it)) { elEmb.checked = true; elFmt.value = formatoDe(it); }
+    if (un(it) === 'm') elUn.value = 'm';
+    var verEmb = function () {
+      var emb = elEmb.checked, f = elFmt.value;
+      campo('formato').classList.toggle('hidden', !emb);
+      campo('caixa_c').classList.toggle('hidden', !(emb && f));
+      campo('caixa_l').classList.toggle('hidden', !(emb && f));
+      campo('caixa_a').classList.toggle('hidden', !(emb && f === 'caixa'));
+      $('label[for="fld-caixa_c"]', m).textContent = f === 'envelope' ? 'Largura (cm)' : 'Comprimento (cm)';
+      $('label[for="fld-caixa_l"]', m).textContent = f === 'envelope' ? 'Altura (cm)' : 'Largura (cm)';
+      var u = elUn.value === 'm' ? 'metros' : 'unidades';
+      $('label[for="fld-qtd_pacote"]', m).textContent = elUn.value === 'm' ? 'Metros no rolo' : 'Unidades';
+      $('label[for="fld-custo_unitario"]', m).textContent = elUn.value === 'm' ? 'Custo por metro (R$)' : 'Custo por unidade (R$)';
+      $('label[for="fld-estoque"]', m).textContent = 'Em estoque (' + u + ')';
+    };
+    if (S.falta14) { ['embalagem', 'formato', 'unidade'].forEach(function (k) { var c = campo(k); if (c) c.classList.add('hidden'); }); ['caixa_c', 'caixa_l', 'caixa_a'].forEach(function (k) { campo(k).classList.add('hidden'); }); }
+    else { [elEmb, elFmt, elUn].forEach(function (el) { el.addEventListener('change', verEmb); }); verEmb(); }
     var elPac = $('[data-k="preco_pacote"]', m), elQtd = $('[data-k="qtd_pacote"]', m), elUni = $('[data-k="custo_unitario"]', m), elEst = $('[data-k="estoque"]', m);
     var calc = $('#ins-calc', m);
     function doPacote() {
@@ -1435,10 +1491,15 @@
           if (!o.nome) return toast('Informe o nome', true);
           o.custo_unitario = centavoAcima(o.custo_unitario || 0);
           if (o.estoque === null) o.estoque = 0;
-          o.unidade = 'un';
           o.id = novoId;
-          if (S.falta13) { delete o.e_caixa; delete o.caixa_c; delete o.caixa_l; delete o.caixa_a; }
-          else if (!o.e_caixa) { o.caixa_c = null; o.caixa_l = null; o.caixa_a = null; }
+          if (S.falta14) { o.unidade = 'un'; delete o.embalagem; delete o.formato; delete o.caixa_c; delete o.caixa_l; delete o.caixa_a; }
+          else {
+            o.unidade = o.unidade === 'm' ? 'm' : 'un';
+            o.formato = o.embalagem && o.formato ? o.formato : null;
+            o.e_caixa = !!o.formato;
+            if (!o.formato) { o.caixa_c = null; o.caixa_l = null; o.caixa_a = null; }
+            if (o.formato === 'envelope') o.caixa_a = null;
+          }
           if (foto.mudou || foto.foto) o.foto = foto.foto;
           var r = q(await sb.from('insumos').upsert(o).select().single());
           S.insumos = S.insumos.filter(function (x) { return x.id !== r.id; }).concat([r]).sort(function (x, y) { return x.nome.localeCompare(y.nome); });
@@ -3184,7 +3245,8 @@
     var pesoG = num(p.peso_g);
     var fotos = (p.fotos || []).filter(isUrl).slice(0, 9);
     var cxS = p.caixa_id && byId(S.insumos, p.caixa_id);
-    var med = cxS && medCaixa(cxS) ? [num(cxS.caixa_c), num(cxS.caixa_l), num(cxS.caixa_a)].map(function (n) { return Math.max(1, Math.ceil(n)); }) : medidasCm(p.medidas);
+    var medP = medidasCm(p.medidas);
+    var med = cxS && medCaixa(cxS) ? [num(cxS.caixa_c), num(cxS.caixa_l), formatoDe(cxS) === 'envelope' ? (medP ? Math.min.apply(null, medP) + 1 : 3) : num(cxS.caixa_a)].map(function (n) { return Math.max(1, Math.ceil(n || 1)); }) : medP;
     var r = {
       nome: (a.titulo || p.nome || '').trim(), descricao: (a.descricao || '').trim(), sku: 'CA-' + String(a.id).replace(/-/g, '').slice(0, 10).toUpperCase(),
       preco: preco ? Math.round(preco * 100) / 100 : null, estoque: p.estoque > 0 ? p.estoque : opc.estoqueEnc,
