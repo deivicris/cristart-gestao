@@ -250,3 +250,5 @@ img.zoomable,.photo img,.foto-uni img{cursor:zoom-in}
 .passo{display:inline-flex;align-items:center;gap:6px}
 .passo .icon-btn{width:30px;height:30px;font-size:16px;font-weight:800}
 .passo b{min-width:22px;text-align:center}
+.atacado-box{border:1px dashed var(--craft);border-radius:12px;padding:12px;background:var(--craft-soft)}
+.at-tbl td,.at-tbl th{padding:6px 8px}

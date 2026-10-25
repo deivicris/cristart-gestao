@@ -410,6 +410,13 @@
   function eEmbalagem(i) { return !!(i && (i.embalagem || formatoDe(i))); }
   function medCaixa(i) { if (!i || !num(i.caixa_c) || !num(i.caixa_l)) return ''; return fmt(num(i.caixa_c)) + ' × ' + fmt(num(i.caixa_l)) + (formatoDe(i) === 'caixa' && num(i.caixa_a) ? ' × ' + fmt(num(i.caixa_a)) : '') + ' cm'; }
   function wMedioImpressoras() { var ws = impressoras().filter(function (e) { return e.status === 'ativo'; }).map(function (e) { return num(e.potencia_w); }).filter(Boolean); return ws.length ? Math.round(ws.reduce(function (a, b) { return a + b; }, 0) / ws.length) : 120; }
+  function faixasAtacado() { var f = S.cfg && S.cfg.atacado_faixas; return Array.isArray(f) && f.length ? f.slice().sort(function (a, b) { return a.min - b.min; }) : [{ min: 10, pct: 10 }, { min: 20, pct: 15 }, { min: 30, pct: 20 }, { min: 50, pct: 30 }]; }
+  function falta15() { return !S.cfg || !('atacado_faixas' in S.cfg); }
+  function tabelaAtacado(p) { // [{min, preco, pct}] do produto
+    var preco = num(p.preco); if (!preco || !p.atacado_modo || p.atacado_modo === 'off') return [];
+    if (p.atacado_modo === 'manual') return (p.atacado_faixas || []).filter(function (f) { return num(f.preco) > 0; }).map(function (f) { return { min: f.min, preco: num(f.preco), pct: Math.round((1 - num(f.preco) / preco) * 1000) / 10 }; }).sort(function (a, b) { return a.min - b.min; });
+    return faixasAtacado().map(function (f) { return { min: f.min, preco: Math.round(preco * (1 - f.pct / 100) * 100) / 100, pct: f.pct }; });
+  }
   function categorias() { return (S.cfg && S.cfg.categorias && S.cfg.categorias.length) ? S.cfg.categorias : ['Decoração', 'Chaveiros', 'Expositores', 'Gamer', 'Brinquedos', 'Utilidades', 'Acessórios']; }
   function tiposFilamento() {
     var base = ['PLA', 'PETG', 'PLA Silk', 'PLA Matte', 'ABS', 'TPU'];
@@ -844,6 +851,7 @@
       '<div class="card"><h2>Custo e preço</h2><div class="grid g2"><div id="cost-box"></div><div class="stack">' +
       '<div class="price-tiles" id="price-tiles"></div>' +
       '<div class="grid g3">' + fPrecos.map(function (f) { return fieldHtml(f, p[f.k]); }).join('') + '</div>' +
+      (falta15() ? '' : '<div class="atacado-box"><div class="row between wrap"><b>💰 Atacado (preço por quantidade)</b><select class="inp inp-s" id="at-modo" aria-label="Atacado"><option value="off">Não tem</option><option value="auto">Automático (% das faixas)</option><option value="manual">Manual (eu digito o preço)</option></select></div><div id="at-tab" style="margin-top:8px"></div></div>') +
       '<div class="row wrap"><button type="button" class="btn btn-g btn-s" id="use-sug">Usar preço sugerido</button><button type="button" class="btn btn-g btn-s" id="calc-card">Calcular preço no cartão (' + fmt(num(cfg.taxa_cartao_pct) || 12) + '%)</button></div>' +
       '</div></div></div>' +
       // estoque
@@ -868,6 +876,10 @@
       o.tempo_min = (h || m) ? Math.round(h * 60 + m) : null;
       o.opcoes = textoParaOpcoes($('#opcoes').value);
       o.estoque = Math.max(0, Math.round(num($('#estoque').value) || 0));
+      if (!falta15() && $('#at-modo')) {
+        o.atacado_modo = $('#at-modo').value;
+        o.atacado_faixas = o.atacado_modo === 'manual' ? $$('#at-tab [data-at-min]').map(function (el) { return { min: +el.dataset.atMin, preco: num(el.value) }; }) : (p.atacado_faixas || null);
+      }
       o.multicor = o.multicor === 'sim';
       o.caixa_id = o.caixa_id || null;
       if (S.falta13) { delete o.multicor; delete o.caixa_id; }
@@ -1026,10 +1038,32 @@
         '<div class="tile" style="border-color:var(--craft)"><div class="lbl">Lucro no Pix</div><div class="v" style="color:' + (lucro !== null && lucro < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + brl(lucro) + '</div><div class="hint">' + (marg !== null ? 'margem real ' + fmt(marg, 0) + '%' : 'defina o preço') + '</div></div>' +
         '<div class="tile"><div class="lbl">Por hora de impressora</div><div class="v">' + (lucro !== null && o.tempo_min && !rev ? brl(lucro / (o.tempo_min / 60)) : '—') + '</div><div class="hint">lucro ÷ tempo</div></div>';
       $('#est-info').textContent = (o.estoque > 0 ? 'No site: “Pronta entrega”.' : 'No site: “Sob encomenda”.') + (o.estoque > 0 ? ' Custo das peças em estoque: ' + brl(o.estoque * c.total) + '.' : '');
+      drawAtacado(o, c);
       drawAds(preco);
     }
+    function drawAtacado(o, c) {
+      var box = $('#at-tab'); if (!box) return;
+      var modo = $('#at-modo').value, preco = num(o.preco);
+      if (modo === 'off') { box.innerHTML = '<div class="small muted">Sem preço de atacado. No site aparece só o preço normal.</div>'; return; }
+      if (!preco) { box.innerHTML = '<div class="small muted">Defina o preço Pix primeiro.</div>'; return; }
+      var manual = modo === 'manual', antes = {};
+      $$('#at-tab [data-at-min]').forEach(function (el) { antes[el.dataset.atMin] = el.value; });
+      var salvos = {}; (p.atacado_faixas || []).forEach(function (f) { salvos[f.min] = f.preco; });
+      box.innerHTML = '<table class="tbl at-tbl"><thead><tr><th>Quantidade</th><th class="num">Preço cada</th><th class="num">Desconto</th><th class="num">Lucro cada</th></tr></thead><tbody>' +
+        faixasAtacado().map(function (f) {
+          var auto = Math.round(preco * (1 - f.pct / 100) * 100) / 100;
+          var vManual = antes[f.min] !== undefined ? antes[f.min] : (salvos[f.min] != null ? fmtIn(Number(salvos[f.min]).toFixed(2)) : '');
+          var v = manual ? (num(vManual) || null) : auto;
+          var lucro = v ? v - c.total : null, pct = v ? Math.round((1 - v / preco) * 1000) / 10 : null;
+          return '<tr><td>' + f.min + '+ un.</td><td class="num">' + (manual ? '<input class="inp inp-s inp-preco" data-at-min="' + f.min + '" inputmode="decimal" value="' + esc(vManual) + '" placeholder="' + esc(fmtIn(auto.toFixed(2))) + '">' : brl(auto)) + '</td>' +
+            '<td class="num">' + (pct !== null ? fmt(pct) + '%' : '—') + '</td>' +
+            '<td class="num" style="font-weight:700;color:' + (lucro !== null && lucro < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + (lucro !== null ? brl(lucro) + (lucro < 0 ? ' ⚠️ abaixo do custo' : '') : '—') + '</td></tr>';
+        }).join('') + '</tbody></table>' +
+        '<div class="hint" style="margin-top:6px">' + (manual ? 'Deixe em branco a faixa que não quiser usar.' : 'As faixas e % padrão ficam em Configurações.') + ' No site, o desconto vale somando todas as opções/cores do produto no carrinho.</div>';
+    }
+    if ($('#at-modo')) $('#at-modo').value = p.atacado_modo || 'off';
     recalc();
-    form.addEventListener('input', function (e) { if (e.target.closest('#ads')) return; dirty = true; recalc(); });
+    form.addEventListener('input', function (e) { if (e.target.closest('#ads')) return; dirty = true; if (e.target.closest('#at-tab')) return; recalc(); });
     form.addEventListener('change', function (e) { if (e.target.closest('#ads')) return; dirty = true; recalc(); });
     $('#use-sug').addEventListener('click', function () { $('[data-k="preco"]').value = fmtIn(ultimoSug.toFixed(2)); dirty = true; recalc(); });
     $('#calc-card').addEventListener('click', function () {
@@ -1721,6 +1755,7 @@
       '<div class="field"><label for="cats">Categorias</label><input class="inp" id="cats" value="' + esc(categorias().join(' | ')) + '"><div class="hint">Separe com |</div></div></div>' +
       '<div class="row" style="justify-content:flex-end"><button class="btn btn-p" type="submit">Salvar configurações</button></div></form></div>' +
 
+      (falta15() ? '' : '<div class="card"><h2>💰 Atacado — faixas padrão</h2><div class="small muted" style="margin-bottom:10px">Usadas nos produtos com atacado “Automático”. Ex.: a partir de 10 unidades, 10% de desconto.</div><div id="at-cfg" class="stack" style="gap:8px"></div><div class="row between wrap" style="margin-top:10px"><button type="button" class="btn btn-g btn-s" id="at-add">+ Faixa</button><button type="button" class="btn btn-p" id="at-salvar">Salvar faixas</button></div></div>') +
       cartaoIAConfig() +
       '<div class="card"><h2>Taxas por plataforma</h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Plataforma</th><th class="num">Taxa %</th><th class="num">Taxa fixa (R$)</th><th>Pode ter contato?</th><th>Ativa</th></tr></thead><tbody>' +
       S.plataformas.map(function (pl) {
@@ -1752,6 +1787,18 @@
       catch (err) { toast(erroMsg(err), true); }
     });
     ligarIAConfig();
+    if ($('#at-cfg')) {
+      var fx = faixasAtacado().map(function (f) { return { min: f.min, pct: f.pct }; });
+      var drawFx = function () { $('#at-cfg').innerHTML = fx.map(function (f, i) { return '<div class="row" style="gap:8px"><span class="small">A partir de</span><input class="inp inp-s" style="width:80px" data-fx="min" data-i="' + i + '" inputmode="numeric" value="' + f.min + '" aria-label="Quantidade mínima"><span class="small">un. →</span><input class="inp inp-s" style="width:80px" data-fx="pct" data-i="' + i + '" inputmode="decimal" value="' + esc(fmtIn(f.pct)) + '" aria-label="Desconto em %"><span class="small">% de desconto</span><button type="button" class="icon-btn" data-fx-del="' + i + '" aria-label="Remover faixa">✕</button></div>'; }).join(''); };
+      drawFx();
+      $('#at-cfg').addEventListener('input', function (e) { var el = e.target, i = +el.dataset.i; if (isNaN(i)) return; fx[i][el.dataset.fx] = el.dataset.fx === 'min' ? Math.round(num(el.value) || 0) : (num(el.value) || 0); });
+      $('#at-cfg').addEventListener('click', function (e) { var b = e.target.closest('[data-fx-del]'); if (b) { fx.splice(+b.dataset.fxDel, 1); drawFx(); } });
+      $('#at-add').addEventListener('click', function () { var u = fx[fx.length - 1] || { min: 0, pct: 0 }; fx.push({ min: u.min + 10, pct: Math.min(90, u.pct + 5) }); drawFx(); });
+      $('#at-salvar').addEventListener('click', async function () {
+        var lista = fx.filter(function (f) { return f.min > 1 && f.pct > 0 && f.pct < 100; }).sort(function (a, b) { return a.min - b.min; });
+        try { S.cfg = q(await sb.from('configuracoes').update({ atacado_faixas: lista }).eq('id', 1).select().single()); fx = lista.slice(); drawFx(); toast('Faixas de atacado salvas ✓'); } catch (err) { toast(erroMsg(err), true); }
+      });
+    }
     $('#save-pl').addEventListener('click', async function () {
       var rows = $$('tr[data-pl]').map(function (tr) {
         return { id: tr.dataset.pl, taxa_pct: num($('[data-f="taxa_pct"]', tr).value) || 0, taxa_fixa: num($('[data-f="taxa_fixa"]', tr).value) || 0, ativa: $('[data-f="ativa"]', tr).checked };
@@ -2851,6 +2898,7 @@
   function dadosProdutoIA(p) {
     var o = { nome: p.nome, categoria: p.categoria, descricao_breve: p.descricao_breve, descricao: p.descricao, medidas: p.medidas, peso_g: num(p.peso_g), tipo: p.tipo_produto === 'revenda' ? 'produto de revenda' : 'produzido em impressão 3D', pronta_entrega: p.estoque > 0 ? p.estoque + ' unidade(s) em estoque' : 'sob encomenda', preco_pix_site: num(p.preco) };
     (p.opcoes || []).forEach(function (op) { if (op && op.name && op.choices && op.choices.length) o['opções de ' + op.name] = op.choices.join(', '); });
+    var at = tabelaAtacado(p); if (at.length) o.precos_atacado_no_site = at.map(function (f) { return 'a partir de ' + f.min + ' un.: ' + brl(f.preco) + ' cada'; }).join('; ');
     Object.keys(o).forEach(function (k) { if (o[k] === null || o[k] === undefined || o[k] === '') delete o[k]; });
     return o;
   }
