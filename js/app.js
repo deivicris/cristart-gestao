@@ -825,7 +825,7 @@
       // textos
       '<div class="card"><h2>Textos e detalhes</h2><div class="grid g2">' + fTextos.slice(0, 2).map(function (f) { return fieldHtml(f, p[f.k]); }).join('') +
       '<div class="grid g2" style="grid-column:1 / -1">' + fieldHtml(fTextos[2], p.medidas) + fieldHtml(fTextos[4], p.peso_g) + '</div>' +
-      '<div class="field" style="grid-column:span 2"><label for="videos">Vídeos (Instagram, TikTok ou YouTube)</label><textarea class="inp" id="videos" rows="2" placeholder="Cole o link do post, um por linha. ex.: https://www.instagram.com/reel/…">' + esc((p.videos || []).join('\n')) + '</textarea><div class="hint" id="videos-hint">Aparecem no site junto das fotos, e dá para assistir ali mesmo.</div></div>' +
+      '<div class="field" style="grid-column:span 2"><div class="row between wrap"><label for="videos">Vídeos (Instagram, TikTok, YouTube ou arquivo)</label><span><button type="button" class="btn btn-g btn-s" id="vid-up">🎬 Enviar vídeo do computador/celular</button><input type="file" id="vid-in" accept="video/mp4,video/webm,video/quicktime,.mp4,.mov,.webm" class="hidden"></span></div><textarea class="inp" id="videos" rows="2" placeholder="Cole o link do post, um por linha. ex.: https://www.instagram.com/reel/…">' + esc((p.videos || []).join('\n')) + '</textarea><div class="hint" id="videos-hint">Aparecem no site junto das fotos, e dá para assistir ali mesmo.</div></div>' +
       '<div class="field" style="grid-column:span 2"><label for="opcoes">Opções para o cliente escolher</label><textarea class="inp" id="opcoes" rows="2" placeholder="Cor: Branco, Preto">' + esc(opcoesParaTexto(p.opcoes)) + '</textarea><div class="hint">Uma por linha, no formato "Nome: opção 1, opção 2".</div></div>' +
       '</div></div>' +
       // produção
@@ -888,6 +888,24 @@
     }
     function atual() { var o = lerForm(); o.id = p.id; return o; }
     function lerVideos() { return $('#videos').value.split(/\s+/).map(function (u) { return u.trim(); }).filter(isUrl); }
+    $('#vid-up').addEventListener('click', function () { $('#vid-in').click(); });
+    $('#vid-in').addEventListener('change', async function (e) {
+      var f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      var mb = f.size / 1048576;
+      if (mb > 15) return toast('Vídeo de ' + fmt(mb, 1) + ' MB é grande demais (máx. 15 MB). Encurte ou exporte em qualidade menor.', true);
+      var ext = (f.name.split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '');
+      var b = $('#vid-up'); b.disabled = true; b.innerHTML = '<span class="spinner"></span> Enviando ' + fmt(mb, 1) + ' MB…';
+      try {
+        var path = 'videos/' + p.id + '/' + Date.now() + '.' + (ext || 'mp4');
+        q(await sb.storage.from('fotos').upload(path, f, { contentType: f.type || 'video/mp4', cacheControl: '31536000', upsert: false }));
+        var url = sb.storage.from('fotos').getPublicUrl(path).data.publicUrl;
+        var ta = $('#videos'); ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + url;
+        dirty = true; ta.dispatchEvent(new Event('input', { bubbles: true }));
+        toast('Vídeo enviado ✓ Salve o produto para ele ir para o site' + (mb > 8 ? ' (dica: vídeos menores carregam mais rápido)' : ''));
+        if (/quicktime|\.mov$/i.test(f.type + ' ' + f.name)) toast('Vídeo .MOV (iPhone) pode não tocar em alguns navegadores. Se der problema, exporte em MP4.', true);
+      } catch (err) { toast('Não enviou o vídeo: ' + erroMsg(err), true); }
+      b.disabled = false; b.textContent = '🎬 Enviar vídeo do computador/celular';
+    });
     $('#videos').addEventListener('input', function () {
       var curtos = lerVideos().filter(function (u) { return /vm\.tiktok\.com|vt\.tiktok\.com|tiktok\.com\/t\//i.test(u) || (/tiktok\.com/i.test(u) && !/\/video\/\d+/.test(u)); });
       $('#videos-hint').innerHTML = curtos.length ? '<span style="color:var(--warn);font-weight:700">Link curto do TikTok não toca dentro do site.</span> Abra o vídeo no navegador e copie o endereço completo (com /video/ e números).' : 'Aparecem no site junto das fotos, e dá para assistir ali mesmo.';
