@@ -878,7 +878,7 @@
       o.estoque = Math.max(0, Math.round(num($('#estoque').value) || 0));
       if (!falta15() && $('#at-modo')) {
         o.atacado_modo = $('#at-modo').value;
-        o.atacado_faixas = o.atacado_modo === 'manual' ? $$('#at-tab [data-at-min]').map(function (el) { return { min: +el.dataset.atMin, preco: num(el.value) }; }) : (p.atacado_faixas || null);
+        o.atacado_faixas = o.atacado_modo === 'manual' ? (atRows || []).filter(function (r) { return r.min > 1 && r.preco > 0; }).map(function (r) { return { min: r.min, preco: Math.round(r.preco * 100) / 100 }; }).sort(function (a, b) { return a.min - b.min; }) : (p.atacado_faixas || null);
       }
       o.multicor = o.multicor === 'sim';
       o.caixa_id = o.caixa_id || null;
@@ -1059,30 +1059,62 @@
       drawAtacado(o, c);
       drawAds(preco);
     }
+    // atacado: no manual, cada faixa tem quantidade, preço e desconto (preço ↔ % ligados)
+    var atRows = null, atCusto = 0, atPreco = 0;
+    function iniciarManual(preco) {
+      if (atRows) return;
+      var salvos = (p.atacado_modo === 'manual' && p.atacado_faixas || []).filter(function (f) { return f && f.min; });
+      atRows = salvos.length ? salvos.map(function (f) { return { min: f.min, preco: num(f.preco) }; })
+        : faixasAtacado().map(function (f) { return { min: f.min, preco: preco ? Math.round(preco * (1 - f.pct / 100) * 100) / 100 : null }; });
+    }
+    function linhaManual(r, i) {
+      var pct = r.preco && atPreco ? Math.round((1 - r.preco / atPreco) * 1000) / 10 : null;
+      return '<tr data-at-i="' + i + '"><td><input class="inp inp-s" style="width:70px;text-align:center" data-at-q inputmode="numeric" value="' + esc(r.min || '') + '" aria-label="A partir de quantas unidades"> <span class="small">+ un.</span></td>' +
+        '<td class="num"><input class="inp inp-s inp-preco" data-at-p inputmode="decimal" value="' + esc(r.preco ? fmtIn(r.preco.toFixed(2)) : '') + '" aria-label="Preço cada"></td>' +
+        '<td class="num"><input class="inp inp-s" style="width:70px;text-align:right" data-at-d inputmode="decimal" value="' + esc(pct !== null ? fmtIn(pct) : '') + '" aria-label="Desconto em %"> <span class="small">%</span></td>' +
+        '<td class="num" data-at-l>' + lucroHtml(r.preco) + '</td><td><button type="button" class="icon-btn" data-at-x aria-label="Remover faixa">✕</button></td></tr>';
+    }
+    function lucroHtml(v) { var l = v ? v - atCusto : null; return '<b style="color:' + (l !== null && l < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + (l !== null ? brl(l) + (l < 0 ? ' ⚠️ abaixo do custo' : '') : '—') + '</b>'; }
     function drawAtacado(o, c) {
       var box = $('#at-tab'); if (!box) return;
       var modo = $('#at-modo').value, preco = num(o.preco);
+      atCusto = c.total; atPreco = preco || 0;
       if (modo === 'off') { box.innerHTML = '<div class="small muted">Sem preço de atacado. No site aparece só o preço normal.</div>'; return; }
       if (!preco) { box.innerHTML = '<div class="small muted">Defina o preço Pix primeiro.</div>'; return; }
-      var manual = modo === 'manual', antes = {};
-      $$('#at-tab [data-at-min]').forEach(function (el) { antes[el.dataset.atMin] = el.value; });
-      var salvos = {}; (p.atacado_faixas || []).forEach(function (f) { salvos[f.min] = f.preco; });
+      if (modo === 'manual') {
+        if (box.querySelector('[data-at-i]') && box.contains(document.activeElement)) return; // não atrapalha quem está digitando
+        iniciarManual(preco);
+        box.innerHTML = '<table class="tbl at-tbl"><thead><tr><th>A partir de</th><th class="num">Preço cada</th><th class="num">Desconto</th><th class="num">Lucro cada</th><th></th></tr></thead><tbody>' + atRows.map(linhaManual).join('') + '</tbody></table>' +
+          '<div class="row between wrap" style="margin-top:6px"><button type="button" class="btn btn-g btn-s" id="at-add-l">+ Faixa</button><span class="hint">Digite o preço <b>ou</b> o desconto: um calcula o outro. No site, o desconto vale somando as opções/cores do produto no carrinho.</span></div>';
+        return;
+      }
       box.innerHTML = '<table class="tbl at-tbl"><thead><tr><th>Quantidade</th><th class="num">Preço cada</th><th class="num">Desconto</th><th class="num">Lucro cada</th></tr></thead><tbody>' +
         faixasAtacado().map(function (f) {
-          var auto = Math.round(preco * (1 - f.pct / 100) * 100) / 100;
-          var vManual = antes[f.min] !== undefined ? antes[f.min] : (salvos[f.min] != null ? fmtIn(Number(salvos[f.min]).toFixed(2)) : '');
-          var v = manual ? (num(vManual) || null) : auto;
-          var lucro = v ? v - c.total : null, pct = v ? Math.round((1 - v / preco) * 1000) / 10 : null;
-          return '<tr><td>' + f.min + '+ un.</td><td class="num">' + (manual ? '<input class="inp inp-s inp-preco" data-at-min="' + f.min + '" inputmode="decimal" value="' + esc(vManual) + '" placeholder="' + esc(fmtIn(auto.toFixed(2))) + '">' : brl(auto)) + '</td>' +
-            '<td class="num">' + (pct !== null ? fmt(pct) + '%' : '—') + '</td>' +
-            '<td class="num" style="font-weight:700;color:' + (lucro !== null && lucro < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + (lucro !== null ? brl(lucro) + (lucro < 0 ? ' ⚠️ abaixo do custo' : '') : '—') + '</td></tr>';
+          var v = Math.round(preco * (1 - f.pct / 100) * 100) / 100;
+          return '<tr><td>' + f.min + '+ un.</td><td class="num">' + brl(v) + '</td><td class="num">' + fmt(f.pct) + '%</td><td class="num">' + lucroHtml(v) + '</td></tr>';
         }).join('') + '</tbody></table>' +
-        '<div class="hint" style="margin-top:6px">' + (manual ? 'Deixe em branco a faixa que não quiser usar.' : 'As faixas e % padrão ficam em Configurações.') + ' No site, o desconto vale somando todas as opções/cores do produto no carrinho.</div>';
+        '<div class="hint" style="margin-top:6px">As faixas e % padrão ficam em Configurações. No site, o desconto vale somando todas as opções/cores do produto no carrinho.</div>';
+    }
+    if ($('#at-tab')) {
+      $('#at-tab').addEventListener('input', function (e) {
+        var tr = e.target.closest('[data-at-i]'); if (!tr) return;
+        var r = atRows[+tr.dataset.atI], el = e.target;
+        if (el.matches('[data-at-q]')) r.min = Math.round(num(el.value) || 0) || null;
+        if (el.matches('[data-at-p]')) { r.preco = num(el.value); var d = $('[data-at-d]', tr); d.value = r.preco && atPreco ? fmtIn(Math.round((1 - r.preco / atPreco) * 1000) / 10) : ''; }
+        if (el.matches('[data-at-d]')) { var pc = num(el.value); r.preco = pc !== null && atPreco ? Math.round(atPreco * (1 - pc / 100) * 100) / 100 : null; $('[data-at-p]', tr).value = r.preco ? fmtIn(r.preco.toFixed(2)) : ''; }
+        $('[data-at-l]', tr).innerHTML = lucroHtml(r.preco);
+        dirty = true;
+      });
+      $('#at-tab').addEventListener('click', function (e) {
+        if (e.target.id === 'at-add-l') { var u = atRows[atRows.length - 1]; atRows.push({ min: u && u.min ? u.min + 10 : 10, preco: null }); dirty = true; $('#at-tab').innerHTML = ''; recalc(); var qs = $$('#at-tab [data-at-q]'); if (qs.length) qs[qs.length - 1].focus(); return; }
+        var x = e.target.closest('[data-at-x]'); if (x) { atRows.splice(+x.closest('[data-at-i]').dataset.atI, 1); dirty = true; $('#at-tab').innerHTML = ''; recalc(); }
+      });
+      $('#at-tab').addEventListener('focusout', function () { setTimeout(function () { if ($('#at-tab') && !$('#at-tab').contains(document.activeElement) && $('#at-modo').value === 'manual') { atRows.sort(function (a, b) { return (a.min || 1e9) - (b.min || 1e9); }); $('#at-tab').innerHTML = ''; recalc(); } }, 0); });
     }
     if ($('#at-modo')) $('#at-modo').value = p.atacado_modo || 'off';
     recalc();
     form.addEventListener('input', function (e) { if (e.target.closest('#ads')) return; dirty = true; if (e.target.closest('#at-tab')) return; recalc(); });
-    form.addEventListener('change', function (e) { if (e.target.closest('#ads')) return; dirty = true; recalc(); });
+    form.addEventListener('change', function (e) { if (e.target.closest('#ads') || e.target.closest('#at-tab')) return; dirty = true; recalc(); });
     $('#use-sug').addEventListener('click', function () { $('[data-k="preco"]').value = fmtIn(ultimoSug.toFixed(2)); dirty = true; recalc(); });
     $('#calc-card').addEventListener('click', function () {
       var pr = num($('[data-k="preco"]').value); if (!pr) return toast('Defina o preço Pix primeiro', true);
