@@ -528,6 +528,17 @@
     document.title = title + ' · CristART 3D';
     $('#top-actions').innerHTML = actions || '';
   }
+  function temaAtual() { var t = document.documentElement.getAttribute('data-theme'); if (t) return t; return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; }
+  function pintarTemaBtn() { var b = $('#tema-btn'); if (b) b.innerHTML = temaAtual() === 'dark' ? '☀️ Tema claro' : '🌙 Tema escuro'; }
+  if ($('#tema-btn')) {
+    pintarTemaBtn();
+    $('#tema-btn').addEventListener('click', function () {
+      var novo = temaAtual() === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', novo);
+      try { localStorage.setItem('cristart_tema', novo); } catch (e) { }
+      pintarTemaBtn();
+    });
+  }
   function closeMenu() { $('#side').classList.remove('open'); $('#scrim').classList.add('hidden'); }
   $('#menu-btn').addEventListener('click', function () { $('#side').classList.add('open'); $('#scrim').classList.remove('hidden'); });
   $('#scrim').addEventListener('click', closeMenu);
@@ -1294,9 +1305,9 @@
       (f.foto ? '<img class="swatch-foto zoomable" data-zoom="' + esc(JSON.stringify([f.foto])) + '" src="' + esc(f.foto) + '" alt="Foto do rolo" loading="lazy" style="border-color:' + esc(f.cor_hex || '#ccc') + '">' : '<div class="swatch" style="background:' + esc(f.cor_hex || '#ccc') + '"></div>') +
       '<div class="grow"><div style="font-weight:700">' + esc(f.tipo + ' ' + f.cor) + '</div><div class="lbl">' + esc(f.marca ? f.marca + ' · ' : '') + 'pago ' + brl(num(f.preco_pago)) + (f.data_compra ? ' · ' + dataBR(f.data_compra) : '') + '</div></div>' +
       '<button class="icon-btn" data-edit="' + f.id + '" aria-label="Editar rolo" title="Editar">' + ICON.edit + '</button></div>' +
-      '<div class="bar"><i style="width:' + pct + '%;background:' + (pct < 25 ? '#C2410C' : '#15803D') + '"></i></div>' +
+      '<div class="bar"><i style="width:' + pct + '%;background:' + (pct < 25 ? 'var(--warn)' : 'var(--ok)') + '"></i></div>' +
       '<div class="row between small"><span class="rest-slot"><button type="button" class="rest-btn" data-rest="' + f.id + '" title="Clique para corrigir o restante">Restante ~' + fmt(rest, 0) + ' g ' + ICON.edit + '</button></span><span class="muted">' + (pg ? brl(pg) + '/g' : '—') + '</span></div>' +
-      '<div class="row between wrap" style="border-top:1px solid #EFEDF4;padding-top:10px;gap:8px">' +
+      '<div class="row between wrap" style="border-top:1px solid var(--line-soft);padding-top:10px;gap:8px">' +
       (isUrl(f.link_compra) ? '<a href="' + esc(f.link_compra) + '" target="_blank" rel="noopener" style="font-weight:700;text-decoration:none;font-size:13px">Comprar de novo ↗</a>' : '<button class="btn btn-g btn-s" data-edit="' + f.id + '">+ Colar link de compra</button>') +
       '<span class="row" style="gap:6px"><button type="button" class="btn btn-g btn-s" data-preco-fil="' + f.id + '" title="Pesquisar preço nas lojas">🔎 Preço</button>' +
       '<button type="button" class="btn btn-g btn-s" data-pesar="' + f.id + '" title="Pesar na balança">⚖ Pesar</button></span></div></div>';
