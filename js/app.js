@@ -766,13 +766,22 @@
   // ------------------------------------------------------------------ PRODUTO (editor)
   function opcoesParaTexto(op) {
     if (!op || !op.length) return '';
-    return op.map(function (o) { return o.name + ': ' + (o.choices || []).join(', '); }).join('\n');
+    return op.map(function (o) { return o.name + ': ' + (o.choices || []).map(function (c) { var x = o.extras && num(o.extras[c]); return c + (x ? ' (' + (x > 0 ? '+' : '−') + fmtIn(Math.abs(x).toFixed(2)) + ')' : ''); }).join(', '); }).join('\n');
   }
   function textoParaOpcoes(t) {
     return String(t || '').split('\n').map(function (l) { return l.trim(); }).filter(Boolean).map(function (l) {
       var i = l.indexOf(':');
       if (i < 0) return { name: l, choices: [] };
-      return { name: l.slice(0, i).trim(), choices: l.slice(i + 1).split(',').map(function (s) { return s.trim(); }).filter(Boolean) };
+      var extras = {}, choices = [];
+      // vírgula dentro do valor (ex.: +10,50) não separa opções
+      l.slice(i + 1).split(/,(?![0-9]{1,2}\s*\))/).map(function (s) { return s.trim(); }).filter(Boolean).forEach(function (c) {
+        var m = c.match(/^(.*?)\s*\(\s*([+\-−])\s*(?:R\$)?\s*([0-9.,]+)\s*\)\s*$/i);
+        if (m && num(m[3]) > 0) { choices.push(m[1].trim()); extras[m[1].trim()] = (m[2] === '+' ? 1 : -1) * num(m[3]); }
+        else choices.push(c);
+      });
+      var o = { name: l.slice(0, i).trim(), choices: choices };
+      if (Object.keys(extras).length) o.extras = extras;
+      return o;
     });
   }
 
@@ -839,7 +848,7 @@
       '<div class="card"><h2>Textos e detalhes</h2><div class="grid g2">' + fTextos.slice(0, 2).map(function (f) { return fieldHtml(f, p[f.k]); }).join('') +
       '<div class="grid g2" style="grid-column:1 / -1">' + fieldHtml(fTextos[2], p.medidas) + fieldHtml(fTextos[4], p.peso_g) + '</div>' +
       '<div class="field" style="grid-column:span 2"><div class="row between wrap"><label for="videos">Vídeos (Instagram, TikTok, YouTube ou arquivo)</label><span><button type="button" class="btn btn-g btn-s" id="vid-up">🎬 Enviar vídeo do computador/celular</button><input type="file" id="vid-in" accept="video/mp4,video/webm,video/quicktime,.mp4,.mov,.webm" class="hidden"></span></div><textarea class="inp" id="videos" rows="2" placeholder="Cole o link do post, um por linha. ex.: https://www.instagram.com/reel/…">' + esc((p.videos || []).join('\n')) + '</textarea><div class="hint" id="videos-hint">Aparecem no site junto das fotos, e dá para assistir ali mesmo.</div></div>' +
-      '<div class="field" style="grid-column:span 2"><label for="opcoes">Opções para o cliente escolher</label><textarea class="inp" id="opcoes" rows="2" placeholder="Cor: Branco, Preto">' + esc(opcoesParaTexto(p.opcoes)) + '</textarea><div class="hint">Uma por linha, no formato "Nome: opção 1, opção 2".</div></div>' +
+      '<div class="field" style="grid-column:span 2"><label for="opcoes">Opções para o cliente escolher</label><textarea class="inp" id="opcoes" rows="2" placeholder="Cor: Branco, Preto">' + esc(opcoesParaTexto(p.opcoes)) + '</textarea><div class="hint">Uma por linha: “Nome: opção 1, opção 2”. Para a opção custar diferente, coloque o valor a mais entre parênteses: <b>Maleta: Sem maleta, Com maleta (+10)</b>. Também dá para descontar: (−5).</div></div>' +
       '</div></div>' +
       // produção
       '<div class="card" id="box-impresso"><h2>Produção</h2><div class="grid g4">' +
