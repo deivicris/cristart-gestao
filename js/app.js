@@ -346,6 +346,8 @@
     S.impressoes = q(r[9]) || [];
     S.perdas = q(r[10]) || [];
     S.vendas = q(r[11]) || [];
+    var r16 = await sb.from('produto_anuncios').select('situacao').limit(1);
+    S.falta16 = !!r16.error;
     var r14 = await sb.from('insumos').select('formato').limit(1);
     S.falta14 = !!r14.error;
     var r13 = await sb.from('produtos').select('multicor').limit(1);
@@ -3312,6 +3314,16 @@
       return combina([p.nome, p.categoria, p.material], busca);
     }).sort(function (a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); });
     var est = function (p, pl) { if (pl.id === 'site') return p.mostrar_no_site ? 'pub' : ''; var l = S.anuncios.filter(function (a) { return a.produto_id === p.id && a.plataforma_id === pl.id && !a.arquivado; }); if (l.some(function (a) { return a.publicado || isUrl(a.url); })) return 'pub'; if (l.some(function (a) { return a.titulo; })) return 'txt'; return ''; };
+    var linkDe = function (p, pl) {
+      if (pl.id === 'site') return p.ativo && p.mostrar_no_site ? ((window.CRISTART_CONFIG || {}).siteUrl || 'https://www.cristart3d.com.br/') + '#/produto/' + encodeURIComponent(p.codigo_site || p.id) : null;
+      var a = S.anuncios.filter(function (x) { return x.produto_id === p.id && x.plataforma_id === pl.id && !x.arquivado && isUrl(x.url); })[0];
+      return a ? a.url : null;
+    };
+    var dotLink = function (p, pl, rotulo) {
+      var e = est(p, pl), u = linkDe(p, pl), dot = '<i class="an-dot ' + e + '"></i>' + (rotulo ? esc(rotulo) : '');
+      if (u) return '<a class="an-dot-a" href="' + esc(u) + '" target="_blank" rel="noopener" title="Abrir em ' + esc(pl.nome) + '">' + dot + '</a>';
+      return '<a class="an-dot-a" href="#/anuncio/' + p.id + '" title="' + esc(pl.nome) + (e === 'txt' ? ': texto pronto — falta colar o link' : ': nada ainda — criar') + '">' + dot + '</a>';
+    };
     var nPub = 0, nTxt = 0;
     S.produtos.filter(function (p) { return p.ativo; }).forEach(function (p) { plats.forEach(function (pl) { var e = est(p, pl); if (e === 'pub') nPub++; else if (e === 'txt') nTxt++; }); });
     v.innerHTML = '<div class="stack">' +
@@ -3320,12 +3332,12 @@
       '<div class="row between wrap">' + buscaHtml('anuncios', 'Pesquisar produto…') +
       '<div class="field" style="min-width:220px"><select class="inp" id="an-falta" aria-label="Filtrar"><option value="">Todos os produtos</option>' + plats.map(function (pl) { return '<option value="' + pl.id + '"' + (pl.id === falta ? ' selected' : '') + '>Ainda não publicados no ' + esc(pl.nome) + '</option>'; }).join('') + '</select></div></div>' +
       '<div class="card" style="padding:12px 14px"><div class="row wrap" style="gap:6px;align-items:center"><span class="lbl" style="margin-right:4px">Plataformas que vocês usam</span>' + todas.map(function (pl) { return '<button type="button" class="chip' + (byId(plats, pl.id) ? ' on' : '') + '" data-ver="' + pl.id + '">' + (byId(plats, pl.id) ? '✓ ' : '') + esc(pl.nome) + '</button>'; }).join('') + '</div><div class="hint" style="margin-top:6px">Só as marcadas aparecem aqui e na hora de criar anúncios. Vale para este aparelho.</div></div>' +
-      '<div class="small muted row wrap" style="gap:12px"><span><i class="an-dot pub"></i> publicado</span><span><i class="an-dot txt"></i> texto pronto</span><span><i class="an-dot"></i> nada ainda</span></div>' +
+      '<div class="small muted row wrap" style="gap:12px"><span>Clique na bolinha: verde abre o anúncio publicado; as outras abrem os anúncios do produto.</span><span><i class="an-dot pub"></i> publicado</span><span><i class="an-dot txt"></i> texto pronto</span><span><i class="an-dot"></i> nada ainda</span></div>' +
       (lista.length ? '<div class="card" style="padding:0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th style="width:58px"></th><th>Produto</th>' + plats.map(function (pl) { return '<th class="hide-m" style="text-align:center">' + esc(pl.nome) + '</th>'; }).join('') + '<th></th></tr></thead><tbody>' +
         lista.map(function (p) {
           return '<tr><td>' + thumbHtml(p.fotos && p.fotos[0], p.fotos) + '</td><td><div style="font-weight:700">' + esc(p.nome) + '</div><div class="small muted">' + esc([p.categoria, p.preco ? brl(num(p.preco)) : ''].filter(Boolean).join(' · ')) + '</div>' +
-            '<div class="show-m an-mini">' + plats.map(function (pl) { return '<span title="' + esc(pl.nome) + '"><i class="an-dot ' + est(p, pl) + '"></i>' + esc(pl.nome.split(' ')[0]) + '</span>'; }).join('') + '</div></td>' +
-            plats.map(function (pl) { return '<td class="hide-m" style="text-align:center"><i class="an-dot ' + est(p, pl) + '" title="' + esc(pl.nome) + '"></i></td>'; }).join('') +
+            '<div class="show-m an-mini">' + plats.map(function (pl) { return dotLink(p, pl, pl.nome.split(' ')[0]); }).join('') + '</div></td>' +
+            plats.map(function (pl) { return '<td class="hide-m" style="text-align:center">' + dotLink(p, pl) + '</td>'; }).join('') +
             '<td class="num"><button class="btn btn-p btn-s" data-an="' + p.id + '">✨ <span class="long">Criar / ver anúncios</span><span class="show-m">Anúncios</span></button></td></tr>';
         }).join('') + '</tbody></table></div></div>' : (busca ? nadaAchado('anuncios') : '<div class="card empty">Nenhum produto aqui. 🎉</div>'));
     ligarBusca('anuncios');
@@ -3392,7 +3404,7 @@
     var med = cxS && medCaixa(cxS) ? [num(cxS.caixa_c), num(cxS.caixa_l), formatoDe(cxS) === 'envelope' ? (medP ? Math.min.apply(null, medP) + 1 : 3) : num(cxS.caixa_a)].map(function (n) { return Math.max(1, Math.ceil(n || 1)); }) : medP;
     var r = {
       nome: (a.titulo || p.nome || '').trim(), descricao: (a.descricao || '').trim(), sku: 'CA-' + String(a.id).replace(/-/g, '').slice(0, 10).toUpperCase(),
-      preco: preco ? Math.round(preco * 100) / 100 : null, estoque: p.estoque > 0 ? p.estoque : opc.estoqueEnc,
+      preco: preco ? Math.round(preco * 100) / 100 : null, estoque: a.estoque != null && a.estoque !== '' ? Math.max(0, Math.round(num(a.estoque))) : (p.estoque > 0 ? p.estoque : opc.estoqueEnc),
       peso: pesoG ? Math.ceil((pesoG + opc.embalagem) / 10) / 100 : null, med: med, fotos: fotos, prazo: p.estoque > 0 ? null : opc.prazo
     };
     var prob = [];
@@ -3458,44 +3470,68 @@
     setHeader('Planilha da Shopee', '<a class="btn btn-g" href="#/anuncios">Voltar</a>');
     if (falta08() || falta09()) { v.innerHTML = '<div class="card note">Rode os scripts <b>08</b> e <b>09</b> no Supabase primeiro.</div>'; return; }
     var opc = S.ui.shopeeOpc || (S.ui.shopeeOpc = { estoqueEnc: 10, prazo: '', embalagem: 0, correios: true, soNovos: true });
-    var marc = S.ui.shopeeMarc || (S.ui.shopeeMarc = {});
     var modeloBuf = S.ui.shopeeModelo || null;
-    var ads = S.anuncios.filter(function (a) { var p = byId(S.produtos, a.produto_id); return a.plataforma_id === 'shopee' && !a.arquivado && p && p.ativo && (!opc.soNovos || !(a.publicado || isUrl(a.url))); })
-      .sort(function (a, b) { return nomeProduto(a.produto_id).localeCompare(nomeProduto(b.produto_id), 'pt-BR'); });
+    var plS = byId(S.plataformas, 'shopee') || { id: 'shopee', taxa_pct: 0, taxa_fixa: 0 };
+    var ads = S.anuncios.filter(function (a) { var p = byId(S.produtos, a.produto_id); return a.plataforma_id === 'shopee' && !a.arquivado && p && p.ativo && (!opc.soNovos || !(a.publicado || isUrl(a.url))); });
     var capas = {};
     ads.forEach(function (a) { var p = byId(S.produtos, a.produto_id); var c = (p.fotos || [])[0]; if (c) capas[c] = (capas[c] || 0) + 1; });
     var linhas = ads.map(function (a) {
       var r = linhaShopee(a, { estoqueEnc: opc.estoqueEnc, prazo: num(opc.prazo), embalagem: num(opc.embalagem) || 0 }), p = byId(S.produtos, a.produto_id);
-      if (marc[a.id] === undefined) marc[a.id] = !r.problemas.length;
+      var custo = custoProduto(p).total, taxa = r.preco ? taxaPara(r.preco, 'shopee') : 0;
+      var sit = r.problemas.length ? 'esperando' : (a.situacao || 'pronto');
       var aviso = (p.fotos || [])[0] && capas[p.fotos[0]] > 1 ? 'mesma foto de capa de outro anúncio (a Shopee não aceita capa repetida)' : '';
-      return { a: a, p: p, r: r, aviso: aviso };
+      return { a: a, p: p, r: r, sit: sit, custo: custo, taxa: taxa, recebe: r.preco ? r.preco - taxa : null, lucro: r.preco ? r.preco - taxa - custo : null, aviso: aviso };
     });
-    var sel = linhas.filter(function (l) { return marc[l.a.id] && !l.r.problemas.length; });
+    linhas = ordenarTabela('shopee', linhas, {
+      nome: function (l) { return l.r.nome || l.p.nome; }, data: function (l) { return l.a.criado_em || ''; }, preco: function (l) { return l.r.preco; },
+      recebe: function (l) { return l.recebe; }, lucro: function (l) { return l.lucro; }, estoque: function (l) { return l.r.estoque; },
+      peso: function (l) { return l.r.peso; }, fotos: function (l) { return l.r.fotos.length; }, sit: function (l) { return { pronto: 0, esperando: 1, nao_publicar: 2 }[l.sit]; }
+    });
+    var sel = linhas.filter(function (l) { return l.sit === 'pronto'; });
+    var th = function (k, t, cls) { return thOrd('shopee', k, t, cls); };
+    var SIT = [['pronto', 'Pronto'], ['esperando', 'Esperando'], ['nao_publicar', 'Não publicar']];
     v.innerHTML = '<div class="stack">' +
-      '<div class="card note">A planilha sai no <b>modelo oficial da Shopee</b> (Adicionar em massa › modelo básico). Depois de baixar: Seller Centre › Produtos › <b>Adicionar em massa</b> › <b>Fazer upload</b>. A Shopee sugere a categoria de cada produto; confira antes de publicar.</div>' +
+      '<div class="card note">A planilha sai no <b>modelo oficial da Shopee</b> e leva só os anúncios em <b>Pronto</b>. Depois de baixar: Seller Centre › Produtos › <b>Adicionar em massa</b> › <b>Fazer upload</b>. Quando o anúncio estiver no ar, cole o link dele aqui.</div>' +
       '<div class="card"><h2>Opções</h2><div class="grid g4">' +
-      '<div class="field"><label for="sh-est">Estoque para os “sob encomenda”</label><input class="inp" id="sh-est" inputmode="numeric" value="' + esc(opc.estoqueEnc) + '"><div class="hint">Produtos com estoque no sistema usam o estoque real.</div></div>' +
+      '<div class="field"><label for="sh-est">Estoque padrão dos “sob encomenda”</label><input class="inp" id="sh-est" inputmode="numeric" value="' + esc(opc.estoqueEnc) + '"><div class="hint">Vale quando o anúncio não tem estoque próprio na lista.</div></div>' +
       '<div class="field"><label for="sh-prazo">Prazo de postagem p/ encomenda (dias)</label><input class="inp" id="sh-prazo" inputmode="numeric" value="' + esc(opc.prazo) + '" placeholder="vazio = envio normal"><div class="hint">Só para os sem estoque. Cada categoria aceita uma faixa (ex.: 3 a 15).</div></div>' +
       '<div class="field"><label for="sh-emb">Somar peso da embalagem (g)</label><input class="inp" id="sh-emb" inputmode="numeric" value="' + esc(opc.embalagem) + '"><div class="hint">O frete é calculado pelo peso.</div></div>' +
       '<div class="stack" style="gap:2px;justify-content:flex-end"><label class="check"><input type="checkbox" id="sh-corr"' + (opc.correios ? ' checked' : '') + '> Ativar Correios</label><label class="check"><input type="checkbox" id="sh-novos"' + (opc.soNovos ? ' checked' : '') + '> Só os ainda não publicados</label></div></div>' +
-      '<div class="row between wrap" style="margin-top:8px"><span class="small muted">' + (modeloBuf ? 'Usando o modelo que você enviou agora.' : 'Usando o modelo básico baixado em 15/10/2026.') + '</span><label class="btn btn-g btn-s" for="sh-modelo">Usar outro modelo da Shopee</label><input type="file" id="sh-modelo" accept=".xlsx" class="hidden"></div></div>' +
-      (linhas.length ? '<div class="card" style="padding:0"><div class="tbl-wrap"><table class="tbl"><thead><tr><th style="width:40px"><input type="checkbox" id="sh-todos" aria-label="Marcar todos"' + (sel.length && sel.length === linhas.filter(function (l) { return !l.r.problemas.length; }).length ? ' checked' : '') + '></th><th style="width:58px"></th><th>Anúncio</th><th class="num">Preço</th><th class="num hide-m">Estoque</th><th class="num hide-m">Peso</th><th class="num hide-m">Fotos</th><th>Situação</th></tr></thead><tbody>' +
+      '<div class="row between wrap" style="margin-top:8px"><span class="small muted">Taxa da Shopee usada nas contas: <b>' + fmt(num(plS.taxa_pct) || 0) + '%' + (num(plS.taxa_fixa) ? ' + ' + brl(num(plS.taxa_fixa)) : '') + '</b> por venda (mude em <a href="#/config">Configurações</a>). ' + (modeloBuf ? 'Usando o modelo que você enviou agora.' : 'Modelo básico baixado em 15/10/2026.') + '</span><label class="btn btn-g btn-s" for="sh-modelo">Usar outro modelo da Shopee</label><input type="file" id="sh-modelo" accept=".xlsx" class="hidden"></div></div>' +
+      (linhas.length ? '<div class="card" style="padding:0"><div class="tbl-wrap"><table class="tbl sh-tbl"><thead><tr><th style="width:58px"></th>' + th('nome', 'Anúncio') + th('data', 'Adicionado', 'hide-m') + th('preco', 'Preço Shopee', 'num') + th('recebe', 'Você recebe', 'num hide-m') + th('lucro', 'Lucro', 'num hide-m') + th('estoque', 'Estoque', 'num hide-m') + th('peso', 'Peso', 'num hide-m') + th('fotos', 'Fotos', 'num hide-m') + th('sit', 'Situação') + '<th class="hide-m">Link da Shopee</th></tr></thead><tbody>' +
         linhas.map(function (l) {
-          var ok = !l.r.problemas.length;
-          return '<tr><td><input type="checkbox" data-sh="' + l.a.id + '"' + (marc[l.a.id] && ok ? ' checked' : '') + (ok ? '' : ' disabled') + ' aria-label="Incluir"></td>' +
-            '<td style="width:58px">' + thumbHtml(l.p.fotos && l.p.fotos[0], l.p.fotos) + '</td>' +
-            '<td><div style="font-weight:700">' + esc(l.r.nome || l.p.nome) + '</div><div class="small muted">' + esc(l.p.nome + (l.a.apelido ? ' · ' + l.a.apelido : '')) + '</div></td>' +
-            '<td class="num">' + (l.r.preco ? brl(l.r.preco) : '—') + '</td><td class="num hide-m">' + l.r.estoque + '</td><td class="num hide-m">' + (l.r.peso ? fmt(l.r.peso * 1000, 0) + ' g' : '—') + '</td><td class="num hide-m">' + l.r.fotos.length + '</td>' +
-            '<td>' + (ok ? '<span class="pill p-ok">pronto</span>' : l.r.problemas.map(function (x) { return '<span class="pill p-warn">' + esc(x) + '</span>'; }).join(' ')) + (l.aviso ? ' <span class="pill p-info" title="' + esc(l.aviso) + '">capa repetida</span>' : '') +
-            (ok ? '' : ' <a class="small" href="#/' + (/peso|foto/.test(l.r.problemas.join()) ? 'produto/' : 'anuncio/') + l.p.id + '">corrigir</a>') + '</td></tr>';
+          var sug = precoPlataforma(num(l.p.preco), plS);
+          return '<tr data-sh="' + l.a.id + '"><td style="width:58px">' + thumbHtml(l.p.fotos && l.p.fotos[0], l.p.fotos) + '</td>' +
+            '<td><div style="font-weight:700">' + esc(l.r.nome || l.p.nome) + '</div><div class="small muted">' + esc(l.p.nome + (l.a.apelido ? ' · ' + l.a.apelido : '')) + '</div>' +
+            (l.r.problemas.length ? '<div style="margin-top:4px">' + l.r.problemas.map(function (x) { return '<span class="pill p-warn">' + esc(x) + '</span>'; }).join(' ') + ' <a class="small" href="#/' + (/peso|foto/.test(l.r.problemas.join()) ? 'produto/' : 'anuncio/') + l.p.id + '">corrigir</a></div>' : '') +
+            (l.aviso ? '<div style="margin-top:4px"><span class="pill p-info" title="' + esc(l.aviso) + '">capa repetida</span></div>' : '') + '</td>' +
+            '<td class="hide-m small">' + (l.a.criado_em ? dataBR(l.a.criado_em) : '—') + '</td>' +
+            '<td class="num"><input class="inp inp-s inp-preco" data-sh-f="preco" inputmode="decimal" value="' + esc(num(l.a.preco) ? fmtIn(num(l.a.preco).toFixed(2)) : '') + '" placeholder="' + esc(sug ? fmtIn(sug.toFixed(2)) : '') + '" aria-label="Preço na Shopee">' + (num(l.a.preco) ? '' : '<div class="hint">sugerido</div>') + '</td>' +
+            '<td class="num hide-m">' + (l.recebe !== null ? brl(l.recebe) + '<div class="hint">taxa ' + brl(l.taxa) + '</div>' : '—') + '</td>' +
+            '<td class="num hide-m" style="font-weight:700;color:' + (l.lucro !== null && l.lucro < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + (l.lucro !== null ? brl(l.lucro) : '—') + '</td>' +
+            '<td class="num hide-m">' + (S.falta16 ? l.r.estoque : '<input class="inp inp-s" style="width:70px;text-align:right" data-sh-f="estoque" inputmode="numeric" value="' + esc(l.a.estoque != null ? l.a.estoque : '') + '" placeholder="' + esc(l.p.estoque > 0 ? l.p.estoque : opc.estoqueEnc) + '" aria-label="Estoque na Shopee">') + '</td>' +
+            '<td class="num hide-m">' + (l.r.peso ? fmt(l.r.peso * 1000, 0) + ' g' : '—') + '</td><td class="num hide-m">' + l.r.fotos.length + '</td>' +
+            '<td>' + (S.falta16 ? '<span class="pill ' + (l.sit === 'pronto' ? 'p-ok' : 'p-warn') + '">' + (l.sit === 'pronto' ? 'Pronto' : 'Esperando') + '</span>' :
+              '<select class="inp inp-s sit-' + l.sit + '" data-sh-f="situacao" aria-label="Situação">' + SIT.map(function (o) { return '<option value="' + o[0] + '"' + (o[0] === l.sit ? ' selected' : '') + (o[0] === 'pronto' && l.r.problemas.length ? ' disabled' : '') + '>' + o[1] + '</option>'; }).join('') + '</select>') + '</td>' +
+            '<td class="hide-m"><input class="inp inp-s" style="width:170px" data-sh-f="url" value="' + esc(l.a.url || '') + '" placeholder="colar link publicado" aria-label="Link do anúncio na Shopee"></td></tr>';
         }).join('') + '</tbody></table></div></div>' : '<div class="card empty">Nenhum anúncio da Shopee ' + (opc.soNovos ? 'por publicar' : '') + '. Crie os textos na página de anúncios de cada produto.</div>') +
-      '<div class="sticky-save"><span class="small muted" style="margin-right:auto;align-self:center">' + sel.length + ' anúncio(s) na planilha</span><button class="btn btn-p" id="sh-baixar"' + (sel.length ? '' : ' disabled') + '>Baixar planilha da Shopee</button></div></div>';
+      '<div class="sticky-save"><span class="small muted" style="margin-right:auto;align-self:center">' + sel.length + ' anúncio(s) em Pronto vão para a planilha</span><button class="btn btn-p" id="sh-baixar"' + (sel.length ? '' : ' disabled') + '>Baixar planilha da Shopee</button></div></div>';
     var ler = function () { opc.estoqueEnc = Math.max(1, Math.round(num($('#sh-est').value) || 10)); opc.prazo = $('#sh-prazo').value.trim(); opc.embalagem = Math.max(0, num($('#sh-emb').value) || 0); opc.correios = $('#sh-corr').checked; opc.soNovos = $('#sh-novos').checked; };
-    ['#sh-est', '#sh-prazo', '#sh-emb'].forEach(function (s) { $(s).addEventListener('change', function () { ler(); render(); }); });
-    ['#sh-corr', '#sh-novos'].forEach(function (s) { $(s).addEventListener('change', function () { ler(); render(); }); });
+    ['#sh-est', '#sh-prazo', '#sh-emb', '#sh-corr', '#sh-novos'].forEach(function (s2) { $(s2).addEventListener('change', function () { ler(); render(); }); });
     $('#sh-modelo').addEventListener('change', async function (e) { var f = e.target.files[0]; if (!f) return; S.ui.shopeeModelo = await f.arrayBuffer(); toast('Modelo carregado ✓'); render(); });
-    if ($('#sh-todos')) $('#sh-todos').addEventListener('change', function (e) { linhas.forEach(function (l) { if (!l.r.problemas.length) marc[l.a.id] = e.target.checked; }); render(); });
-    v.onchange = function (e) { var c = e.target.closest('[data-sh]'); if (c) { marc[c.dataset.sh] = c.checked; render(); } };
+    v.onclick = function (e) { var t = e.target.closest('th[data-ord]'); if (t) clicarOrdem(t); };
+    v.onkeydown = function (e) { if (e.key === 'Enter' && e.target.matches('[data-sh-f]')) { e.preventDefault(); e.target.blur(); } };
+    v.onchange = async function (e) {
+      var el = e.target, f = el.dataset.shF, tr = el.closest('[data-sh]'); if (!f || !tr) return;
+      var a = byId(S.anuncios, tr.dataset.sh), patch = {}, msg = 'Salvo ✓';
+      if (f === 'preco') { var pv = num(el.value); if (el.value.trim() && !(pv > 0)) return toast('Preço inválido', true); patch.preco = pv; msg = 'Preço na Shopee salvo ✓'; }
+      if (f === 'estoque') { var ev = num(el.value); patch.estoque = el.value.trim() === '' ? null : Math.max(0, Math.round(ev || 0)); msg = 'Estoque salvo ✓'; }
+      if (f === 'situacao') { patch.situacao = el.value; msg = { pronto: 'Vai na planilha ✓', esperando: 'Esperando — fica fora da planilha', nao_publicar: 'Não publicar — fica fora da planilha' }[el.value]; }
+      if (f === 'url') { var u = el.value.trim(); if (u && !isUrl(u)) return toast('Cole o link completo (começa com https://)', true); patch.url = u || null; patch.publicado = !!u; msg = u ? 'Publicado ✓' + (opc.soNovos ? ' — saiu da lista dos não publicados' : '') : 'Link removido'; }
+      patch.atualizado_em = new Date().toISOString();
+      try { q(await sb.from('produto_anuncios').update(patch).eq('id', a.id)); Object.assign(a, patch); toast(msg); render(); }
+      catch (err) { toast('Não salvou: ' + erroMsg(err), true); }
+    };
     $('#sh-baixar').addEventListener('click', async function () {
       var b = this; b.disabled = true; b.innerHTML = '<span class="spinner"></span> Montando…';
       try {
