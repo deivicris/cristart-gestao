@@ -280,3 +280,5 @@ select.sit-nao_publicar{color:var(--ink-faint);font-weight:700}
 .an-dot-a:hover{background:var(--surface-2)}
 .an-dot-a:hover .an-dot{transform:scale(1.25)}
 .an-mini .an-dot-a{min-width:0;min-height:22px;padding:0 4px}
+.lbl-mini{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-soft)}
+.chip.chip-s{min-height:34px;padding:6px 12px;font-size:13px}

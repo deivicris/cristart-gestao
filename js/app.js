@@ -346,6 +346,8 @@
     S.impressoes = q(r[9]) || [];
     S.perdas = q(r[10]) || [];
     S.vendas = q(r[11]) || [];
+    var r17 = await sb.from('produtos').select('categorias_extra').limit(1);
+    S.falta17 = !!r17.error;
     var r16 = await sb.from('produto_anuncios').select('situacao').limit(1);
     S.falta16 = !!r16.error;
     var r14 = await sb.from('insumos').select('formato').limit(1);
@@ -687,11 +689,11 @@
       var list = S.produtos.filter(function (p) {
         if (b) {
           var ads = S.anuncios.filter(function (a) { return a.produto_id === p.id && !a.arquivado && (a.url || a.publicado); });
-          var txt = [p.nome, p.categoria, p.material, p.descricao_breve, p.medidas, p.tipo_produto === 'revenda' ? 'revenda' : 'impresso', p.codigo_site]
+          var txt = [p.nome, p.categoria, (p.categorias_extra || []).join(' '), p.material, p.descricao_breve, p.medidas, p.tipo_produto === 'revenda' ? 'revenda' : 'impresso', p.codigo_site]
             .concat(ads.map(function (a) { var pl = byId(S.plataformas, a.plataforma_id); return (pl ? pl.nome : a.plataforma_id); }), ads.map(function (a) { return a.url; }));
           if (!combina(txt, b)) return false;
         }
-        if (c && p.categoria !== c) return false;
+        if (c && p.categoria !== c && (p.categorias_extra || []).indexOf(c) < 0) return false;
         if (st === 'ativos' && !p.ativo) return false;
         if (st === 'inativos' && p.ativo) return false;
         if (st === 'estoque' && !(p.estoque > 0)) return false;
@@ -840,7 +842,8 @@
       '<form id="pf" class="stack" novalidate>' +
       // básico
       '<div class="card"><h2>Básico</h2><div class="grid g4">' + fBasico.map(function (f) { return fieldHtml(f, p[f.k]); }).join('') + '</div>' +
-      '<div class="row wrap" style="gap:22px;margin-top:8px">' + fFlags.map(function (f) { return fieldHtml(f, p[f.k]); }).join('') + '</div></div>' +
+      '<div class="row wrap" style="gap:22px;margin-top:8px">' + fFlags.map(function (f) { return fieldHtml(f, p[f.k]); }).join('') + '</div>' +
+      (S.falta17 ? '' : '<div style="margin-top:12px"><div class="lbl-mini">Também aparece em</div><div class="row wrap" id="cat-extra" style="gap:6px;margin-top:6px"></div><div class="hint">A categoria principal é a de cima (é a que vai para a Shopee e o Mercado Livre). Toque nas outras para o produto aparecer também nelas no site.</div></div>') + '</div>' +
       // fotos
       '<div class="card"><div class="row between"><h2 style="margin:0">Fotos</h2><span class="small muted">A primeira é a capa. Dá para escolher, arrastar ou colar um print (Ctrl+V).</span></div><div class="photos" id="photos" style="margin-top:12px"></div>' +
       '<input type="file" id="photo-in" accept="image/*" multiple class="hidden"></div>' +
@@ -902,6 +905,7 @@
         o.atacado_modo = $('#at-modo').value;
         o.atacado_faixas = o.atacado_modo === 'manual' ? (atRows || []).filter(function (r) { return r.min > 1 && r.preco > 0; }).map(function (r) { return { min: r.min, preco: Math.round(r.preco * 100) / 100 }; }).sort(function (a, b) { return a.min - b.min; }) : (p.atacado_faixas || null);
       }
+      if (!S.falta17) o.categorias_extra = catsExtra.filter(function (c) { return c && c !== o.categoria; });
       o.multicor = o.multicor === 'sim';
       o.caixa_id = o.caixa_id || null;
       if (S.falta13) { delete o.multicor; delete o.caixa_id; }
@@ -1040,15 +1044,37 @@
       go('#/anuncio/' + p.id);
     });
     var selCat = $('[data-k="categoria"]'), catAnterior = selCat ? selCat.value : null;
+    var catsExtra = (p.categorias_extra || []).slice();
+    function drawCatExtra() {
+      var box = $('#cat-extra'); if (!box) return;
+      var princ = selCat ? selCat.value : p.categoria;
+      var lista = categorias().concat(catsExtra.filter(function (c) { return categorias().indexOf(c) < 0; })).filter(function (c) { return c !== princ; });
+      box.innerHTML = lista.map(function (c) { var on = catsExtra.indexOf(c) >= 0; return '<button type="button" class="chip chip-s' + (on ? ' on' : '') + '" data-cx="' + esc(c) + '" aria-pressed="' + on + '">' + (on ? '✓ ' : '+ ') + esc(c) + '</button>'; }).join('') +
+        '<button type="button" class="chip chip-s" data-cx-nova="1">➕ Nova…</button>';
+    }
+    if ($('#cat-extra')) {
+      drawCatExtra();
+      $('#cat-extra').addEventListener('click', function (e) {
+        var b = e.target.closest('[data-cx]');
+        if (b) { var c = b.getAttribute('data-cx'), i = catsExtra.indexOf(c); if (i >= 0) catsExtra.splice(i, 1); else catsExtra.push(c); dirty = true; drawCatExtra(); return; }
+        if (e.target.closest('[data-cx-nova]')) novaCategoria(function (nome) {
+          if (selCat && !Array.prototype.some.call(selCat.options, function (o) { return o.value === nome; })) {
+            var o = document.createElement('option'); o.value = nome; o.textContent = nome;
+            selCat.insertBefore(o, selCat.querySelector('option[value="__nova"]'));
+          }
+          if (catsExtra.indexOf(nome) < 0) catsExtra.push(nome); dirty = true; drawCatExtra();
+        });
+      });
+    }
     if (selCat) selCat.addEventListener('change', function () {
-      if (selCat.value !== '__nova') { catAnterior = selCat.value; return; }
+      if (selCat.value !== '__nova') { catAnterior = selCat.value; drawCatExtra(); return; }
       selCat.value = catAnterior;
       novaCategoria(function (nome) {
         if (!Array.prototype.some.call(selCat.options, function (o) { return o.value === nome; })) {
           var o = document.createElement('option'); o.value = nome; o.textContent = nome;
           selCat.insertBefore(o, selCat.querySelector('option[value="__nova"]'));
         }
-        selCat.value = nome; catAnterior = nome; dirty = true; recalc();
+        selCat.value = nome; catAnterior = nome; dirty = true; drawCatExtra(); recalc();
       });
     });
     if ($('#dup-prod')) $('#dup-prod').addEventListener('click', function () {
