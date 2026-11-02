@@ -3868,8 +3868,8 @@
     });
   }
 
-  function mlPacote(p) {
-    var cx = p.caixa_id && byId(S.insumos, p.caixa_id), medP = medidasCm(p.medidas);
+  function mlPacote(p, cxId) {
+    var cx = (cxId === undefined ? p.caixa_id : cxId) && byId(S.insumos, cxId === undefined ? p.caixa_id : cxId), medP = medidasCm(p.medidas);
     var med = cx && medCaixa(cx) ? [num(cx.caixa_c), num(cx.caixa_l), formatoDe(cx) === 'envelope' ? (medP ? Math.min.apply(null, medP) + 1 : 3) : num(cx.caixa_a)].map(function (n) { return Math.max(1, Math.ceil(n || 1)); }) : medP;
     return { c: med ? med[0] : '', l: med ? med[1] : '', a: med ? med[2] : '', peso: num(p.peso_g) ? Math.ceil(num(p.peso_g) + 50) : '' };
   }
@@ -3930,9 +3930,15 @@
       '<div class="field"><label for="ml-prazo">Prazo de fabricação (dias)</label><input class="inp" id="ml-prazo" inputmode="numeric" value="' + esc(st.prazo) + '" placeholder="vazio = pronta entrega"><div class="hint">Para produto feito sob encomenda. O ML soma esse prazo ao do envio.</div></div>' +
       '<div class="field"><label for="ml-gar">Garantia do vendedor (dias)</label><input class="inp" id="ml-gar" inputmode="numeric" value="' + esc(st.garantia) + '"><div class="hint">0 = sem garantia</div></div>' +
       '<div class="field" style="grid-column:span 3"><label>Frete (Mercado Envios)</label><div id="ml-frete"></div></div></div></div>' +
-      '<div class="card"><h2>5. Pacote para o envio</h2><div class="grid g4">' +
+      '<div class="card"><h2>5. Pacote para o envio</h2>' +
+      '<div class="row wrap" style="gap:10px;align-items:flex-end;margin-bottom:10px"><div class="field grow" style="min-width:240px;margin:0"><label for="ml-cx">Vai em qual caixa ou envelope?</label><select class="inp" id="ml-cx"><option value="">— escolher —</option>' +
+      caixas().map(function (i) { return '<option value="' + i.id + '"' + (i.id === p.caixa_id ? ' selected' : '') + '>' + esc(i.nome) + (medCaixa(i) ? ' · ' + medCaixa(i) : ' · sem medidas cadastradas') + '</option>'; }).join('') + '</select></div>' +
+      '<label class="check small" style="margin-bottom:10px"><input type="checkbox" id="ml-cx-salvar" checked> guardar no produto</label>' +
+      '<a class="btn btn-g btn-s" href="#/insumos" target="_blank" rel="noopener" style="margin-bottom:6px">Cadastrar caixa / envelope ' + ICON.ext + '</a></div>' +
+      (caixas().length ? '' : '<div class="note" style="margin-bottom:10px">Ainda não tem nenhuma caixa ou envelope cadastrado. Em <b>Insumos e extras</b>, cadastre cada embalagem que vocês usam marcando que é <b>caixa</b> ou <b>envelope</b>, com as medidas (C × L × A em cm). Depois é só escolher aqui — e fica guardado no produto.</div>') +
+      '<div class="grid g4">' +
       ['c:Comprimento (cm)', 'l:Largura (cm)', 'a:Altura (cm)', 'peso:Peso com embalagem (g)'].map(function (x) { var k = x.split(':'); return '<div class="field"><label for="ml-pk-' + k[0] + '">' + k[1] + '</label><input class="inp" id="ml-pk-' + k[0] + '" data-pk="' + k[0] + '" inputmode="decimal" value="' + esc(st.pacote[k[0]]) + '"></div>'; }).join('') +
-      '</div><div class="hint">Vem da caixa e do peso cadastrados no produto (+50 g de embalagem). O ML usa isso para calcular o frete.</div></div>' +
+      '</div><div class="hint" id="ml-pk-hint">Medidas da caixa (ou envelope) por fora, e o peso dela fechada com a peça dentro. O peso é o da peça cadastrada +50 g de embalagem — se tiver balança, confira. O ML usa isso para calcular o frete; se ficar menor que o real, ele cobra a diferença depois.</div></div>' +
       '<div class="card"><h2>6. Fotos e descrição</h2><div class="row wrap" style="gap:8px;margin-bottom:10px">' + (st.fotos.length ? st.fotos.map(function (f) { return thumbHtml(f, st.fotos); }).join('') : '<span class="bad-t">Este produto não tem fotos. Cadastre pelo menos uma no produto.</span>') + '</div>' +
       '<div class="field"><label for="ml-desc">Descrição</label><textarea class="inp" id="ml-desc" rows="14">' + esc(a.descricao || '') + '</textarea><div class="hint">Pode editar aqui: ao publicar, o texto novo também fica salvo no anúncio Mercado Livre do sistema. Emojis são tirados, porque o ML não aceita.</div></div></div>' +
       '<div id="ml-res"></div>' +
@@ -3953,6 +3959,11 @@
     });
     box.addEventListener('change', function (e) {
       if (e.target.id === 'ml-tipo') drawTipo();
+      if (e.target.id === 'ml-cx') {
+        var cx = byId(S.insumos, e.target.value), pk = mlPacote(p, e.target.value || null);
+        if (cx && !medCaixa(cx)) toast('Essa embalagem está sem medidas. Cadastre em Insumos e extras ou digite abaixo.', true);
+        ['c', 'l', 'a', 'peso'].forEach(function (k) { if (pk[k] !== '' && (cx ? medCaixa(cx) || k === 'peso' : true)) $('#ml-pk-' + k).value = pk[k]; });
+      }
       if (e.target.id === 'ml-fg') st.freteGratis = e.target.checked;
       var k = e.target.dataset.mla; if (k) lerAttr(k);
     });
@@ -4074,6 +4085,10 @@
       var btn = this, txt = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publicando…';
       $('#ml-res').innerHTML = '';
       try {
+        var cxSel = $('#ml-cx').value || null;
+        if (cxSel && cxSel !== p.caixa_id && $('#ml-cx-salvar').checked && !S.falta13) {
+          try { var pr = q(await sb.from('produtos').update({ caixa_id: cxSel }).eq('id', p.id).select().single()); S.produtos = S.produtos.map(function (x) { return x.id === pr.id ? pr : x; }); p.caixa_id = cxSel; } catch (x) { }
+        }
         var desc = $('#ml-desc').value;
         if (desc !== (a.descricao || '')) {
           var sv = q(await sb.from('produto_anuncios').update({ descricao: desc, atualizado_em: new Date().toISOString() }).eq('id', a.id).select().single());
