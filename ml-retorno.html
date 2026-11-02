@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="robots" content="noindex"><title>Conectando o Mercado Livre…</title>
+<script>
+var q = new URLSearchParams(location.search), o = new URLSearchParams();
+['code', 'state', 'error'].forEach(function (k) { if (q.get(k)) o.set('ml_' + k, q.get(k)); });
+location.replace('./#/mlretorno?' + o.toString());
+</script></head>
+<body style="font-family:sans-serif;padding:24px">Conectando o Mercado Livre…</body></html>

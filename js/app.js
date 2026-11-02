@@ -348,6 +348,8 @@
     S.vendas = q(r[11]) || [];
     var r17 = await sb.from('produtos').select('categorias_extra').limit(1);
     S.falta17 = !!r17.error;
+    var r18 = await sb.from('produto_anuncios').select('ml_item_id').limit(1);
+    S.falta18 = !!r18.error;
     var r16 = await sb.from('produto_anuncios').select('situacao').limit(1);
     S.falta16 = !!r16.error;
     var r14 = await sb.from('insumos').select('formato').limit(1);
@@ -521,7 +523,7 @@
   }
   function go(h) { if (location.hash === h) render(); else location.hash = h; }
   function renderNav(tela) {
-    var base = tela === 'produto' ? 'produtos' : tela === 'pedido' ? 'pedidos' : (tela === 'anuncio' || tela === 'shopee' || tela === 'fotos') ? 'anuncios' : tela;
+    var base = tela === 'produto' ? 'produtos' : tela === 'pedido' ? 'pedidos' : (tela === 'anuncio' || tela === 'shopee' || tela === 'fotos' || tela === 'ml' || tela === 'mlretorno') ? 'anuncios' : tela;
     $('#nav').innerHTML = NAV.map(function (n) {
       if (n.sep) return '<div class="nav-sep"></div>';
       return '<a class="nav-btn' + (n.id === base ? ' on' : '') + '" href="#/' + n.id + '">' + esc(n.t) + (n.soon ? '<span class="soon">' + n.soon + '</span>' : '') + '</a>';
@@ -585,6 +587,8 @@
         case 'anuncio': return telaAnuncio(v, r.arg);
         case 'shopee': return telaShopee(v);
         case 'fotos': return telaFotos(v, r.arg);
+        case 'ml': return telaML(v, r.arg);
+        case 'mlretorno': return telaMlRetorno(v);
         default: go('#/painel');
       }
     } catch (e) {
@@ -3161,7 +3165,7 @@
         '<div class="field"><div class="row between"><label>Título</label><div class="row" style="gap:8px"><span class="small ' + (n > lim ? 'bad-t' : 'muted') + '" data-cont>' + n + '/' + lim + '</span><button type="button" class="btn btn-g btn-s" data-cp="titulo">Copiar</button></div></div><input class="inp" data-f="titulo" value="' + esc(a.titulo || '') + '"></div>' +
         '<div class="field"><div class="row between"><label>Descrição</label><button type="button" class="btn btn-g btn-s" data-cp="descricao">Copiar</button></div><textarea class="inp" data-f="descricao" rows="12">' + esc(a.descricao || '') + '</textarea></div>' +
         '<div class="field"><div class="row between"><label>' + (pl.id === 'instagram' ? 'Hashtags' : 'Palavras-chave') + '</label><button type="button" class="btn btn-g btn-s" data-cp="palavras_chave">Copiar</button></div><input class="inp" data-f="palavras_chave" value="' + esc(a.palavras_chave || '') + '"></div>' +
-        '<div class="row wrap" style="gap:6px;justify-content:flex-end"><button type="button" class="btn btn-g" data-cp="tudo">Copiar tudo</button>' + (LINK_ANUNCIAR[pl.id] ? '<a class="btn btn-p" href="' + LINK_ANUNCIAR[pl.id] + '" target="_blank" rel="noopener">Ir anunciar ' + ICON.ext + '</a>' : '') + '</div></div>';
+        '<div class="row wrap" style="gap:6px;justify-content:flex-end"><button type="button" class="btn btn-g" data-cp="tudo">Copiar tudo</button>' + (pl.id === 'ml' ? '<button type="button" class="btn btn-p" data-ac="ml">' + (a.ml_item_id ? '🟡 Gerenciar no Mercado Livre' : '🚀 Publicar no Mercado Livre') + '</button>' : '') + (LINK_ANUNCIAR[pl.id] && !(pl.id === 'ml') ? '<a class="btn btn-p" href="' + LINK_ANUNCIAR[pl.id] + '" target="_blank" rel="noopener">Ir anunciar ' + ICON.ext + '</a>' : '') + '</div></div>';
     }
     function draw() {
       $('#an-lista').innerHTML = lista.length ? lista.map(cartao).join('') : '<div class="card empty">Nenhum anúncio ainda. Lá em cima: marque onde vai anunciar e clique em <b>✨ Criar com IA</b>.</div>';
@@ -3195,6 +3199,7 @@
       if (ac.dataset.ac === 'dup') { selDel = {}; var d = novoAd(p.id, a.plataforma_id, a); d.apelido = (a.apelido ? a.apelido + ' ' : '') + '(cópia)'; lista.splice(i + 1, 0, d); dirty = true; draw(); toast('Anúncio duplicado — mude o que quiser e salve'); var el = $('[data-i="' + (i + 1) + '"]'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
       if (ac.dataset.ac === 'del') { if (a._novo) { lista.splice(i, 1); selDel = {}; return draw(); } try { await arquivarAds([a.id]); } catch (x) { return; } lista.splice(i, 1); selDel = {}; draw(); drawArquivo(); }
       if (ac.dataset.ac === 'outro') copiarParaOutro(a);
+      if (ac.dataset.ac === 'ml') { if (a._novo || dirty) return toast('Salve os anúncios antes de publicar no ML', true); go('#/ml/' + a.id); }
       if (ac.dataset.ac === 'ia') gerar([a], ac);
     });
     function copiarParaOutro(a) {
@@ -3789,6 +3794,344 @@
       if (a === 'add') adicionar(i, false);
       if (a === 'capa') adicionar(i, true);
       if (a === 'x') { URL.revokeObjectURL(st.res[i].url); st.res.splice(i, 1); drawRes(); }
+    });
+  }
+
+  // ------------------------------------------------------------------ MERCADO LIVRE (publicar pelo sistema)
+  var ML_TIPOS = [{ v: 'gold_special', t: 'Clássico', pct: 11.5, d: 'taxa menor; parcelamento com juros para o cliente' }, { v: 'gold_pro', t: 'Premium', pct: 16.5, d: 'taxa maior; parcela sem juros e mais destaque' }];
+  var ML_AUTO = ['SELLER_SKU', 'SELLER_PACKAGE_HEIGHT', 'SELLER_PACKAGE_WIDTH', 'SELLER_PACKAGE_LENGTH', 'SELLER_PACKAGE_WEIGHT', 'GTIN', 'ITEM_CONDITION'];
+  var ML_STATUS = { active: ['No ar', 'p-ok'], paused: ['Pausado', 'p-warn'], closed: ['Finalizado', 'p-mut'], under_review: ['Em revisão no ML', 'p-warn'], inactive: ['Inativo', 'p-mut'], payment_required: ['Aguardando pagamento', 'p-warn'] };
+  async function mlChamar(acao, extra) {
+    var r = await sb.functions.invoke('mercado-livre', { body: Object.assign({ acao: acao }, extra || {}) });
+    if (r.error) {
+      var m = '';
+      try { var j = await r.error.context.json(); m = j && j.erro; } catch (x) { }
+      if (!m) { m = erroMsg(r.error); if (/Failed to send|fetch|NetworkError|not found|404/i.test(m)) m = 'A função "mercado-livre" ainda não está publicada no Supabase.'; }
+      throw new Error(m);
+    }
+    if (r.data && r.data.erro) throw new Error(r.data.erro);
+    return r.data;
+  }
+  async function mlConectar(btn) {
+    var st = uid();
+    try { sessionStorage.setItem('ml_volta', location.hash || '#/anuncios'); sessionStorage.setItem('ml_state', st); } catch (x) { }
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Abrindo o Mercado Livre…'; }
+    try { var d = await mlChamar('url_conectar', { state: st }); location.href = d.url; }
+    catch (err) { toast(err.message, true); if (btn) { btn.disabled = false; btn.textContent = 'Conectar Mercado Livre'; } }
+  }
+  function mlStatusPill(s) { var x = ML_STATUS[s] || [s || '—', 'p-mut']; return '<span class="pill ' + x[1] + '">' + esc(x[0]) + '</span>'; }
+  function mlTrocarAd(novo) { if (!novo) return; S.anuncios = S.anuncios.map(function (x) { return x.id === novo.id ? novo : x; }); }
+
+  function telaMlRetorno(v) {
+    setHeader('Mercado Livre');
+    var qs = new URLSearchParams(location.hash.split('?')[1] || ''), code = qs.get('ml_code'), state = qs.get('ml_state'), erro = qs.get('ml_error');
+    var volta = '#/anuncios', esperado = null;
+    try { volta = sessionStorage.getItem('ml_volta') || volta; esperado = sessionStorage.getItem('ml_state'); } catch (x) { }
+    var falhou = function (msg) { v.innerHTML = '<div class="card"><h2>Não conectou</h2><p>' + esc(msg) + '</p><div class="row" style="gap:8px"><button class="btn btn-p" id="ml-de-novo">Tentar de novo</button><a class="btn btn-g" href="' + esc(volta) + '">Voltar</a></div></div>'; $('#ml-de-novo').addEventListener('click', function () { mlConectar(this); }); };
+    if (erro) return falhou(erro === 'access_denied' ? 'A autorização foi cancelada na tela do Mercado Livre.' : 'O Mercado Livre devolveu: ' + erro);
+    if (!code) return falhou('Não veio o código de autorização do Mercado Livre.');
+    if (esperado && state && state !== esperado) return falhou('O retorno não bate com o pedido de conexão. Tente de novo.');
+    if (S.ui.mlCode === code) return;
+    S.ui.mlCode = code;
+    v.innerHTML = '<div class="card"><span class="spinner" style="border-color:var(--line);border-top-color:var(--craft)"></span> Conectando a conta do Mercado Livre…</div>';
+    mlChamar('conectar', { code: code }).then(function (d) {
+      S.ml = { conectado: true, nickname: d.nickname };
+      try { sessionStorage.removeItem('ml_state'); } catch (x) { }
+      toast('Mercado Livre conectado ✓' + (d.nickname ? ' (' + d.nickname + ')' : ''));
+      location.replace(location.pathname + volta);
+    }, function (err) { falhou(err.message); });
+  }
+
+  function telaML(v, adId) {
+    var a = byId(S.anuncios, adId), p = a && byId(S.produtos, a.produto_id);
+    if (!a || !p) { setHeader('Mercado Livre'); v.innerHTML = '<div class="card">Anúncio não encontrado. Salve os anúncios do produto antes. <a href="#/anuncios">Voltar</a></div>'; return; }
+    setHeader('Mercado Livre · ' + p.nome, '<a class="btn btn-g" href="#/anuncio/' + p.id + '">Voltar aos anúncios</a>');
+    if (S.falta18) { v.innerHTML = '<div class="card note">Para publicar no Mercado Livre pelo sistema, rode o script <b>18</b> no SQL Editor do Supabase e atualize a página (Ctrl+F5).</div>'; return; }
+    v.innerHTML = '<div class="stack"><div class="card row between wrap" id="ml-conta" style="gap:8px"><span><span class="spinner" style="border-color:var(--line);border-top-color:var(--craft)"></span> Verificando a conta do Mercado Livre…</span></div><div id="ml-corpo" class="stack"></div></div>';
+    var hashAqui = location.hash;
+    mlChamar('status').then(function (s) {
+      if (location.hash !== hashAqui) return;
+      S.ml = s;
+      if (!s.conectado) {
+        $('#ml-conta').innerHTML = '<div><b>Conecte a conta do Mercado Livre</b><div class="small muted">É uma vez só: abre a tela do ML, quem é dono da conta entra e clica em “Permitir”. Depois o sistema publica sozinho.' + (s.erro ? ' <br>Detalhe: ' + esc(s.erro) : '') + '</div></div><button class="btn btn-p" id="ml-con">Conectar Mercado Livre</button>';
+        $('#ml-con').addEventListener('click', function () { mlConectar(this); });
+        return;
+      }
+      $('#ml-conta').innerHTML = '<span>✅ Conectado ao Mercado Livre como <b>' + esc(s.nickname || '—') + '</b></span><button class="btn btn-g btn-s" id="ml-sair">Desconectar</button>';
+      $('#ml-sair').addEventListener('click', async function () {
+        if (!(await confirmar('Desconectar o Mercado Livre?', 'Os anúncios que já estão no ar continuam lá. Só não dá para publicar nem atualizar pelo sistema até conectar de novo.', 'Desconectar', true))) return;
+        try { await mlChamar('desconectar'); S.ml = null; render(); } catch (err) { toast(err.message, true); }
+      });
+      if (a.ml_item_id) mlGerenciar($('#ml-corpo'), a, p); else mlPublicar($('#ml-corpo'), a, p);
+    }, function (err) {
+      $('#ml-conta').innerHTML = '<div class="err">' + esc(err.message) + '</div>';
+    });
+  }
+
+  function mlPacote(p) {
+    var cx = p.caixa_id && byId(S.insumos, p.caixa_id), medP = medidasCm(p.medidas);
+    var med = cx && medCaixa(cx) ? [num(cx.caixa_c), num(cx.caixa_l), formatoDe(cx) === 'envelope' ? (medP ? Math.min.apply(null, medP) + 1 : 3) : num(cx.caixa_a)].map(function (n) { return Math.max(1, Math.ceil(n || 1)); }) : medP;
+    return { c: med ? med[0] : '', l: med ? med[1] : '', a: med ? med[2] : '', peso: num(p.peso_g) ? Math.ceil(num(p.peso_g) + 50) : '' };
+  }
+  function mlNorm(s) { return norm(String(s || '')).replace(/[^a-z0-9]+/g, ' ').trim(); }
+  function mlValorPadrao(at, p, st) {
+    var id = at.id, med = medidasCm(p.medidas);
+    if (id === 'BRAND' || id === 'MANUFACTURER') return 'CristART 3D';
+    if (id === 'MODEL') return p.nome.slice(0, 60);
+    if (id === 'EMPTY_GTIN_REASON') { var v0 = (at.valores || []).filter(function (x) { return /nao tem codigo|nao possui|sem codigo/.test(mlNorm(x.nome)); })[0]; return v0 ? v0.nome : ''; }
+    if (id === 'IS_KIT') return 'Não';
+    if (med && /^(LENGTH|DEPTH)$/.test(id)) return med[0] + ' cm';
+    if (med && id === 'WIDTH') return med[1] + ' cm';
+    if (med && id === 'HEIGHT') return med[2] + ' cm';
+    if (num(p.peso_g) && (id === 'WEIGHT' || id === 'PRODUCT_WEIGHT')) return Math.round(num(p.peso_g)) + ' g';
+    return '';
+  }
+  function mlObrigatorio(at) { var t = at.tags || {}; return !!(t.required || t.catalog_required || at.id === 'EMPTY_GTIN_REASON'); }
+  function mlVisivel(at) { var t = at.tags || {}; return !t.hidden && !t.read_only && !t.fixed && !t.others && ML_AUTO.indexOf(at.id) < 0 && !t.variation_attribute && !t.allow_variations; }
+  function mlCampo(at, val) {
+    var id = 'mla-' + at.id, ob = mlObrigatorio(at);
+    var lbl = '<label for="' + id + '">' + esc(at.nome) + (ob ? ' <span class="bad-t">*</span>' : '') + '</label>';
+    var ctl;
+    if (at.tipo === 'number_unit') {
+      var m = String(val || '').match(/^\s*([0-9.,]+)\s*(.*)$/), n = m ? m[1] : '', u = m && m[2] ? m[2] : (at.unidade_padrao || (at.unidades || [])[0] || '');
+      ctl = '<div class="row" style="gap:6px"><input class="inp" id="' + id + '" data-mla="' + at.id + '" data-parte="n" inputmode="decimal" value="' + esc(n) + '" style="flex:1"><select class="inp" data-mla="' + at.id + '" data-parte="u" style="width:auto" aria-label="Unidade">' + (at.unidades || [u]).map(function (x) { return '<option' + (x === u ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select></div>';
+    } else if ((at.tipo === 'list' || at.tipo === 'boolean') && (at.valores || []).length) {
+      ctl = '<select class="inp" id="' + id + '" data-mla="' + at.id + '"><option value="">— escolher —</option>' + at.valores.map(function (x) { return '<option' + (mlNorm(x.nome) === mlNorm(val) ? ' selected' : '') + '>' + esc(x.nome) + '</option>'; }).join('') + '</select>';
+    } else {
+      ctl = '<input class="inp" id="' + id + '" data-mla="' + at.id + '" value="' + esc(val || '') + '"' + (at.tipo === 'number' ? ' inputmode="decimal"' : '') + ((at.valores || []).length ? ' list="dl-' + at.id + '"' : '') + (at.max ? ' maxlength="' + at.max + '"' : '') + '>' +
+        ((at.valores || []).length ? '<datalist id="dl-' + at.id + '">' + at.valores.map(function (x) { return '<option value="' + esc(x.nome) + '">'; }).join('') + '</datalist>' : '');
+    }
+    return '<div class="field">' + lbl + ctl + (at.dica ? '<div class="hint">' + esc(at.dica) + '</div>' : '') + '</div>';
+  }
+  function mlAtributoItem(at, val) {
+    val = String(val == null ? '' : val).trim(); if (!val) return null;
+    var v = (at.valores || []).filter(function (x) { return mlNorm(x.nome) === mlNorm(val); })[0];
+    if (v && v.id) return { id: at.id, value_id: String(v.id) };
+    return { id: at.id, value_name: val };
+  }
+
+  function mlPublicar(box, a, p) {
+    var plML = byId(S.plataformas, 'ml') || { id: 'ml' }, sug = precoPlataforma(num(p.preco), plML) || num(p.preco);
+    var d0 = a.ml_dados || {};
+    var st = {
+      titulo: (a.titulo || p.nome || '').slice(0, 60), preco: num(a.preco) || sug || '', qtd: a.estoque != null && a.estoque !== '' ? num(a.estoque) : (p.estoque > 0 ? p.estoque : 10),
+      tipo: d0.tipo || 'gold_special', garantia: d0.garantia != null ? d0.garantia : 30, prazo: d0.prazo != null ? d0.prazo : (p.estoque > 0 ? '' : 7), freteGratis: d0.freteGratis != null ? d0.freteGratis : true,
+      pacote: d0.pacote || mlPacote(p), fotos: (p.fotos || []).filter(isUrl).slice(0, 10),
+      cats: [], cat: a.ml_categoria ? { id: a.ml_categoria, nome: d0.categoria_nome || a.ml_categoria } : null, attrs: [], vals: Object.assign({}, d0.vals || {}), busca: ''
+    };
+    box.innerHTML =
+      '<div class="card"><h2>1. Título <span class="small muted" id="ml-tcont"></span></h2><input class="inp" id="ml-titulo" maxlength="60" value="' + esc(st.titulo) + '"><div class="hint">Máximo 60 letras. Depois da primeira venda o ML não deixa mais trocar o título. Vem do anúncio “Mercado Livre” deste produto.</div></div>' +
+      '<div class="card"><h2>2. Categoria no Mercado Livre</h2><div id="ml-cats" class="stack" style="gap:6px"></div><div class="row wrap" style="gap:6px;margin-top:10px"><input class="inp grow" id="ml-busca" placeholder="não achou? escreva o que é o produto (ex.: luminoso led)"><button type="button" class="btn btn-g" id="ml-buscar">Buscar categoria</button></div></div>' +
+      '<div class="card"><div class="row between wrap" style="gap:8px"><h2 style="margin:0">3. Características</h2><button type="button" class="btn btn-g btn-s" id="ml-ia" disabled>✨ Preencher com IA</button></div><div class="small muted" style="margin:6px 0 10px">O ML pede estas informações para a categoria escolhida. As com <span class="bad-t">*</span> são obrigatórias.</div><div id="ml-attrs"><div class="small muted">Escolha a categoria primeiro.</div></div></div>' +
+      '<div class="card"><h2>4. Preço, estoque e envio</h2><div class="grid g4">' +
+      '<div class="field"><label for="ml-preco">Preço no ML (R$)</label><input class="inp" id="ml-preco" inputmode="decimal" value="' + esc(fmtIn(st.preco)) + '"><div class="hint">' + (sug ? 'sugerido com a taxa: ' + brl(sug) : '') + '</div></div>' +
+      '<div class="field"><label for="ml-qtd">Quantidade à venda</label><input class="inp" id="ml-qtd" inputmode="numeric" value="' + esc(st.qtd) + '"><div class="hint">' + (p.estoque > 0 ? 'em estoque: ' + p.estoque : 'sem estoque: vende sob encomenda') + '</div></div>' +
+      '<div class="field"><label for="ml-tipo">Tipo de anúncio</label><select class="inp" id="ml-tipo">' + ML_TIPOS.map(function (t) { return '<option value="' + t.v + '"' + (t.v === st.tipo ? ' selected' : '') + '>' + t.t + ' (' + fmtIn(t.pct) + '%)</option>'; }).join('') + '</select><div class="hint" id="ml-tipo-d"></div></div>' +
+      '<div class="field"><label for="ml-prazo">Prazo de fabricação (dias)</label><input class="inp" id="ml-prazo" inputmode="numeric" value="' + esc(st.prazo) + '" placeholder="vazio = pronta entrega"><div class="hint">Para produto feito sob encomenda. O ML soma esse prazo ao do envio.</div></div>' +
+      '<div class="field"><label for="ml-gar">Garantia do vendedor (dias)</label><input class="inp" id="ml-gar" inputmode="numeric" value="' + esc(st.garantia) + '"><div class="hint">0 = sem garantia</div></div>' +
+      '<div class="field" style="grid-column:span 3"><label>Frete (Mercado Envios)</label><div id="ml-frete"></div></div></div></div>' +
+      '<div class="card"><h2>5. Pacote para o envio</h2><div class="grid g4">' +
+      ['c:Comprimento (cm)', 'l:Largura (cm)', 'a:Altura (cm)', 'peso:Peso com embalagem (g)'].map(function (x) { var k = x.split(':'); return '<div class="field"><label for="ml-pk-' + k[0] + '">' + k[1] + '</label><input class="inp" id="ml-pk-' + k[0] + '" data-pk="' + k[0] + '" inputmode="decimal" value="' + esc(st.pacote[k[0]]) + '"></div>'; }).join('') +
+      '</div><div class="hint">Vem da caixa e do peso cadastrados no produto (+50 g de embalagem). O ML usa isso para calcular o frete.</div></div>' +
+      '<div class="card"><h2>6. Fotos e descrição</h2><div class="an-fotos" style="margin-bottom:10px">' + (st.fotos.length ? st.fotos.map(function (f) { return thumbHtml(f, st.fotos); }).join('') : '<span class="bad-t">Este produto não tem fotos. Cadastre pelo menos uma no produto.</span>') + '</div>' +
+      '<div class="field"><label>Descrição (do anúncio Mercado Livre)</label><textarea class="inp" rows="8" readonly>' + esc(a.descricao || '') + '</textarea><div class="hint">Para mudar o texto, edite o anúncio na tela de anúncios e salve. Emojis são tirados, porque o ML não aceita.</div></div></div>' +
+      '<div id="ml-res"></div>' +
+      '<div class="sticky-save"><a class="btn btn-g" href="#/anuncio/' + p.id + '">Cancelar</a><button type="button" class="btn btn-p" id="ml-pub">🚀 Publicar no Mercado Livre</button></div>';
+
+    function tcont() { var n = $('#ml-titulo').value.length; $('#ml-tcont').textContent = n + '/60'; }
+    tcont();
+    function drawTipo() { var t = ML_TIPOS.filter(function (x) { return x.v === $('#ml-tipo').value; })[0]; var pr = num($('#ml-preco').value); $('#ml-tipo-d').textContent = t.d + (pr ? ' · taxa ≈ ' + brl(pr * t.pct / 100) : ''); }
+    function drawFrete() {
+      var pr = num($('#ml-preco').value) || 0, obrig = pr >= 79;
+      if (obrig) st.freteGratis = true;
+      $('#ml-frete').innerHTML = '<label class="check"><input type="checkbox" id="ml-fg"' + (st.freteGratis ? ' checked' : '') + (obrig ? ' disabled' : '') + '> Frete grátis para o cliente</label><div class="hint">' + (obrig ? 'A partir de R$ 79 o ML obriga o frete grátis. Vocês pagam uma parte do frete (o ML mostra o valor no anúncio).' : 'Abaixo de R$ 79 pode deixar o cliente pagar o frete.') + '</div>';
+    }
+    drawTipo(); drawFrete();
+    box.addEventListener('input', function (e) {
+      if (e.target.id === 'ml-titulo') tcont();
+      if (e.target.id === 'ml-preco') { drawTipo(); drawFrete(); }
+    });
+    box.addEventListener('change', function (e) {
+      if (e.target.id === 'ml-tipo') drawTipo();
+      if (e.target.id === 'ml-fg') st.freteGratis = e.target.checked;
+      var k = e.target.dataset.mla; if (k) lerAttr(k);
+    });
+    function lerAttr(k) {
+      var n = $('[data-mla="' + k + '"][data-parte="n"]', box);
+      if (n) { var u = $('[data-mla="' + k + '"][data-parte="u"]', box); st.vals[k] = n.value.trim() ? n.value.trim() + ' ' + (u ? u.value : '') : ''; }
+      else { var el = $('[data-mla="' + k + '"]', box); if (el) st.vals[k] = el.value; }
+    }
+
+    // categorias
+    function drawCats(msg) {
+      var lista = st.cats.slice();
+      if (st.cat && !lista.some(function (c) { return c.id === st.cat.id; })) lista.unshift(st.cat);
+      $('#ml-cats').innerHTML = (msg ? '<div class="small muted">' + msg + '</div>' : '') + lista.map(function (c) {
+        var on = st.cat && st.cat.id === c.id;
+        return '<label class="check ml-cat' + (on ? ' on' : '') + '"><input type="radio" name="ml-cat" value="' + esc(c.id) + '"' + (on ? ' checked' : '') + '> <span><b>' + esc(c.nome) + '</b><span class="small muted" style="display:block">' + esc(c.caminho || c.dominio || c.id) + '</span></span></label>';
+      }).join('');
+    }
+    async function buscarCats(termo) {
+      drawCats('<span class="spinner" style="border-color:var(--line);border-top-color:var(--craft);width:14px;height:14px"></span> Procurando a categoria no ML…');
+      try {
+        var d = await mlChamar('categorias', { q: termo });
+        st.cats = d.categorias || [];
+        if (!st.cat && st.cats[0]) { st.cat = st.cats[0]; carregarAttrs(); }
+        drawCats(st.cats.length ? 'O ML sugeriu (a primeira é a mais provável):' : 'O ML não achou categoria para esse texto. Tente outras palavras.');
+      } catch (err) { drawCats(''); toast(err.message, true); }
+    }
+    $('#ml-cats').addEventListener('change', function (e) {
+      if (e.target.name !== 'ml-cat') return;
+      st.cat = st.cats.filter(function (c) { return c.id === e.target.value; })[0] || st.cat; drawCats(); carregarAttrs();
+    });
+    $('#ml-buscar').addEventListener('click', function () { var t = $('#ml-busca').value.trim(); if (!t) return toast('Escreva o que é o produto', true); buscarCats(t); });
+    $('#ml-busca').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); $('#ml-buscar').click(); } });
+
+    // características
+    async function carregarAttrs() {
+      $('#ml-attrs').innerHTML = '<div class="small muted"><span class="spinner" style="border-color:var(--line);border-top-color:var(--craft);width:14px;height:14px"></span> Carregando as características da categoria…</div>';
+      $('#ml-ia').disabled = true;
+      try {
+        var d = await mlChamar('atributos', { categoria: st.cat.id });
+        st.attrs = d.atributos || []; st.catInfo = d.categoria;
+        if (d.categoria && d.categoria.nome) st.cat.nome = d.categoria.nome;
+        st.attrs.forEach(function (at) { if (!st.vals[at.id]) st.vals[at.id] = mlValorPadrao(at, p, st); });
+        drawAttrs(); $('#ml-ia').disabled = false;
+      } catch (err) { $('#ml-attrs').innerHTML = '<div class="err">' + esc(err.message) + '</div>'; }
+    }
+    function drawAttrs() {
+      var vis = st.attrs.filter(mlVisivel), ob = vis.filter(mlObrigatorio), op = vis.filter(function (x) { return !mlObrigatorio(x); });
+      var aberto = $('#ml-op') && $('#ml-op').open;
+      $('#ml-attrs').innerHTML = (st.catInfo && st.catInfo.caminho ? '<div class="small muted" style="margin-bottom:8px">' + esc(st.catInfo.caminho) + '</div>' : '') +
+        (ob.length ? '<div class="grid g2">' + ob.map(function (at) { return mlCampo(at, st.vals[at.id]); }).join('') + '</div>' : '<div class="small muted">Esta categoria não tem características obrigatórias além das que o sistema preenche sozinho.</div>') +
+        (op.length ? '<details id="ml-op" style="margin-top:10px"' + (aberto ? ' open' : '') + '><summary class="small" style="cursor:pointer">Mais características (opcionais, ajudam o anúncio a aparecer nas buscas) · ' + op.length + '</summary><div class="grid g2" style="margin-top:8px">' + op.map(function (at) { return mlCampo(at, st.vals[at.id]); }).join('') + '</div></details>' : '');
+    }
+    $('#ml-ia').addEventListener('click', async function () {
+      var btn = this, vis = st.attrs.filter(mlVisivel); if (!vis.length) return;
+      vis.forEach(function (at) { lerAttr(at.id); });
+      var lista = vis.map(function (at) { return { id: at.id, nome: at.nome, tipo: at.tipo, obrigatoria: mlObrigatorio(at), opcoes: (at.valores || []).slice(0, 80).map(function (x) { return x.nome; }), unidades: at.unidades, atual: st.vals[at.id] || '' }; });
+      var prompt = 'Você preenche as características de um anúncio no Mercado Livre Brasil.\n' +
+        'Produto: ' + JSON.stringify({ nome: p.nome, titulo: $('#ml-titulo').value, descricao: (a.descricao || p.descricao || '').slice(0, 2500), medidas: p.medidas, peso_g: p.peso_g, material: p.material, multicor: p.multicor, categoria_ml: st.cat.nome, fabricado_em: 'impressão 3D pela CristART 3D' }) + '\n' +
+        'Regras: marca e fabricante = "CristART 3D". Quando a característica tiver "opcoes", responda EXATAMENTE um dos textos da lista. Para medidas, responda número e unidade (ex.: "10 cm"), usando uma das "unidades". ' +
+        'Se não der para saber com segurança pelas fotos e pelos dados, deixe o valor vazio — não invente. Mantenha o "atual" quando já estiver certo.\n' +
+        'Características: ' + JSON.stringify(lista);
+      var schema = { type: 'OBJECT', properties: { valores: { type: 'ARRAY', items: { type: 'OBJECT', properties: { id: { type: 'STRING' }, valor: { type: 'STRING' } }, required: ['id', 'valor'] } } }, required: ['valores'] };
+      var txt = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Preenchendo…';
+      try {
+        var d = await chamarGemini({ prompt: prompt, schema: schema, fotos: st.fotos.slice(0, 3), modelo: (S.cfg || {}).ia_modelo || 'gemini-3.8-flash' });
+        var n = 0;
+        ((d.dados || {}).valores || []).forEach(function (r) {
+          var at = byId(vis, r.id), val = String(r.valor || '').trim(); if (!at || !val) return;
+          if ((at.tipo === 'list' || at.tipo === 'boolean') && (at.valores || []).length && !at.valores.some(function (x) { return mlNorm(x.nome) === mlNorm(val); })) return;
+          if (st.vals[at.id] !== val) { st.vals[at.id] = val; n++; }
+        });
+        drawAttrs(); toast(n ? n + ' característica(s) preenchida(s) — confira antes de publicar' : 'A IA não mudou nada');
+      } catch (err) { toast(err.message, true); }
+      btn.disabled = false; btn.innerHTML = txt;
+    });
+
+    // publicar
+    function montar() {
+      st.attrs.filter(mlVisivel).forEach(function (at) { lerAttr(at.id); });
+      var falta = [], titulo = $('#ml-titulo').value.trim(), preco = num($('#ml-preco').value), qtd = Math.round(num($('#ml-qtd').value) || 0);
+      var prazo = Math.round(num($('#ml-prazo').value) || 0), gar = Math.round(num($('#ml-gar').value) || 0), tipo = $('#ml-tipo').value;
+      var pk = {}; $$('[data-pk]', box).forEach(function (el) { pk[el.dataset.pk] = num(el.value) || ''; });
+      if (titulo.length < 5) falta.push('título');
+      if (!st.cat) falta.push('categoria');
+      if (!preco || preco < 1) falta.push('preço');
+      if (qtd < 1) falta.push('quantidade (mínimo 1)');
+      if (!st.fotos.length) falta.push('fotos (cadastre no produto)');
+      var attrs = [];
+      st.attrs.forEach(function (at) {
+        var val = st.vals[at.id];
+        if (mlVisivel(at)) {
+          var it = mlAtributoItem(at, val);
+          if (it) attrs.push(it); else if (mlObrigatorio(at)) falta.push(at.nome);
+        }
+      });
+      var tem = function (id) { return st.attrs.some(function (x) { return x.id === id; }); };
+      attrs.push({ id: 'SELLER_SKU', value_name: 'CA-' + String(a.id).replace(/-/g, '').slice(0, 10).toUpperCase() });
+      if (tem('SELLER_PACKAGE_LENGTH') && pk.c && pk.l && pk.a && pk.peso) {
+        attrs.push({ id: 'SELLER_PACKAGE_LENGTH', value_name: Math.ceil(pk.c) + ' cm' }, { id: 'SELLER_PACKAGE_WIDTH', value_name: Math.ceil(pk.l) + ' cm' }, { id: 'SELLER_PACKAGE_HEIGHT', value_name: Math.ceil(pk.a) + ' cm' }, { id: 'SELLER_PACKAGE_WEIGHT', value_name: Math.ceil(pk.peso) + ' g' });
+      }
+      var termos = [{ id: 'WARRANTY_TYPE', value_name: gar > 0 ? 'Garantia do vendedor' : 'Sem garantia' }];
+      if (gar > 0) termos.push({ id: 'WARRANTY_TIME', value_name: gar + ' dias' });
+      if (prazo > 0) termos.push({ id: 'MANUFACTURING_TIME', value_name: prazo + ' dias' });
+      var gratis = preco >= 79 ? true : !!st.freteGratis;
+      var item = {
+        title: titulo, category_id: st.cat && st.cat.id, price: Math.round(preco * 100) / 100, currency_id: 'BRL', available_quantity: qtd,
+        buying_mode: 'buy_it_now', condition: 'new', listing_type_id: tipo,
+        pictures: st.fotos.map(function (u) { return { source: u }; }), attributes: attrs, sale_terms: termos,
+        shipping: { mode: 'me2', local_pick_up: false, free_shipping: gratis }
+      };
+      var dados = { tipo: tipo, garantia: gar, prazo: prazo || '', freteGratis: gratis, pacote: pk, vals: st.vals, categoria_nome: st.cat && st.cat.nome };
+      return { falta: falta, item: item, dados: dados };
+    }
+    $('#ml-pub').addEventListener('click', async function () {
+      var m = montar();
+      if (m.falta.length) { $('#ml-res').innerHTML = '<div class="card err">Falta preencher: <b>' + esc(m.falta.join(', ')) + '</b></div>'; $('#ml-res').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+      if (!(await confirmar('Publicar no Mercado Livre?', '“' + m.item.title + '” por ' + brl(m.item.price) + ', ' + m.item.available_quantity + ' unidade(s), anúncio ' + (m.item.listing_type_id === 'gold_pro' ? 'Premium' : 'Clássico') + (m.item.shipping.free_shipping ? ', frete grátis' : '') + '. Ele entra no ar na hora.', 'Publicar'))) return;
+      var btn = this, txt = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publicando…';
+      $('#ml-res').innerHTML = '';
+      try {
+        var d = await mlChamar('publicar', { anuncio_id: a.id, item: m.item, descricao: a.descricao || '', dados: m.dados });
+        mlTrocarAd(d.anuncio);
+        toast('Publicado no Mercado Livre ✓');
+        if (d.aviso) toast(d.aviso, true);
+        render();
+      } catch (err) {
+        $('#ml-res').innerHTML = '<div class="card err"><b>Não publicou.</b> ' + esc(err.message) + '<div class="small" style="margin-top:6px">Se for uma característica, ajuste no passo 3 e tente de novo. Se não entender o erro, me mande um print.</div></div>';
+        $('#ml-res').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      btn.disabled = false; btn.innerHTML = txt;
+    });
+
+    if (st.cat) { st.cats = [st.cat]; drawCats(); carregarAttrs(); }
+    buscarCats(st.titulo || p.nome);
+  }
+
+  function mlGerenciar(box, a, p) {
+    box.innerHTML = '<div class="card"><div class="row between wrap" style="gap:8px"><div><h2 style="margin:0 0 4px">No Mercado Livre</h2><div class="small muted">Item ' + esc(a.ml_item_id) + '</div></div><div class="row wrap" style="gap:6px" id="ml-st">' + mlStatusPill(a.ml_status) + '</div></div>' +
+      '<div class="row wrap" style="gap:8px;margin-top:12px">' + (isUrl(a.url) ? '<a class="btn btn-p" href="' + esc(a.url) + '" target="_blank" rel="noopener">Abrir no Mercado Livre ' + ICON.ext + '</a>' : '') + '<button class="btn btn-g" id="ml-ver">Atualizar situação</button></div><div id="ml-info" class="small muted" style="margin-top:10px"></div></div>' +
+      '<div class="card"><h2>Mudar o anúncio no ML</h2><div class="grid g4">' +
+      '<div class="field"><label for="ml-preco">Preço (R$)</label><input class="inp" id="ml-preco" inputmode="decimal" value="' + esc(fmtIn(a.preco)) + '"></div>' +
+      '<div class="field"><label for="ml-qtd">Quantidade à venda</label><input class="inp" id="ml-qtd" inputmode="numeric" placeholder="não mudar"><div class="hint">em estoque no sistema: ' + (p.estoque || 0) + '</div></div></div>' +
+      '<div class="row wrap" style="gap:16px;margin:6px 0 12px"><label class="check"><input type="checkbox" id="ml-u-desc"> Enviar a descrição do anúncio de novo</label><label class="check"><input type="checkbox" id="ml-u-fotos"> Enviar as fotos do produto de novo</label><label class="check"><input type="checkbox" id="ml-u-tit"> Enviar o título (' + esc((a.titulo || '').slice(0, 60)) + ')</label></div>' +
+      '<div class="row wrap" style="gap:8px;justify-content:space-between"><div class="row wrap" style="gap:8px"><button class="btn btn-g" id="ml-pausa">Pausar</button><button class="btn btn-g" id="ml-ativa">Reativar</button><button class="btn btn-d" id="ml-fim">Finalizar anúncio</button></div><button class="btn btn-p" id="ml-env">Enviar mudanças</button></div></div>';
+    function info(d) {
+      var it = d.item || {};
+      $('#ml-st').innerHTML = mlStatusPill(it.status) + (it.sub_status && it.sub_status.length ? ' <span class="small muted">' + esc(it.sub_status.join(', ')) + '</span>' : '');
+      $('#ml-info').innerHTML = 'Preço no ML: <b>' + brl(it.price) + '</b> · à venda: <b>' + (it.available_quantity != null ? it.available_quantity : '—') + '</b> · vendidos: <b>' + (it.sold_quantity || 0) + '</b>' + (it.health != null ? ' · saúde do anúncio: <b>' + Math.round(it.health * 100) + '%</b>' : '');
+      if (d.anuncio) mlTrocarAd(d.anuncio);
+    }
+    function ver() { mlChamar('ver', { anuncio_id: a.id }).then(info, function (err) { $('#ml-info').textContent = err.message; }); }
+    ver();
+    $('#ml-ver').addEventListener('click', ver);
+    async function status(s, txtOk) {
+      try { var d = await mlChamar('mudar_status', { anuncio_id: a.id, status: s }); if (d.anuncio) mlTrocarAd(d.anuncio); toast(txtOk); ver(); }
+      catch (err) { toast(err.message, true); }
+    }
+    $('#ml-pausa').addEventListener('click', function () { status('paused', 'Anúncio pausado no ML'); });
+    $('#ml-ativa').addEventListener('click', function () { status('active', 'Anúncio reativado no ML ✓'); });
+    $('#ml-fim').addEventListener('click', async function () {
+      if (!(await confirmar('Finalizar no Mercado Livre?', 'O anúncio sai do ar de vez (não dá para reativar; teria que publicar de novo).', 'Finalizar', true))) return;
+      status('closed', 'Anúncio finalizado no ML');
+    });
+    $('#ml-env').addEventListener('click', async function () {
+      var mud = {}, pr = num($('#ml-preco').value), qt = $('#ml-qtd').value.trim();
+      if (pr && pr !== num(a.preco)) mud.price = Math.round(pr * 100) / 100;
+      if (qt !== '') mud.available_quantity = Math.round(num(qt) || 0);
+      if ($('#ml-u-fotos').checked) mud.pictures = (p.fotos || []).filter(isUrl).slice(0, 10).map(function (u) { return { source: u }; });
+      if ($('#ml-u-tit').checked && a.titulo) mud.title = a.titulo.slice(0, 60);
+      var desc = $('#ml-u-desc').checked ? (a.descricao || '') : '';
+      if (!Object.keys(mud).length && !desc) return toast('Nada para enviar', true);
+      var btn = this; btn.disabled = true;
+      try {
+        var d = await mlChamar('atualizar', { anuncio_id: a.id, mudancas: mud, descricao: desc });
+        if (d.anuncio) mlTrocarAd(d.anuncio);
+        toast('Mudanças enviadas ao ML ✓'); (d.avisos || []).forEach(function (x) { toast(x, true); }); ver();
+      } catch (err) { toast(err.message, true); }
+      btn.disabled = false;
     });
   }
 
