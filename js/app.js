@@ -3933,8 +3933,8 @@
       '<div class="card"><h2>5. Pacote para o envio</h2><div class="grid g4">' +
       ['c:Comprimento (cm)', 'l:Largura (cm)', 'a:Altura (cm)', 'peso:Peso com embalagem (g)'].map(function (x) { var k = x.split(':'); return '<div class="field"><label for="ml-pk-' + k[0] + '">' + k[1] + '</label><input class="inp" id="ml-pk-' + k[0] + '" data-pk="' + k[0] + '" inputmode="decimal" value="' + esc(st.pacote[k[0]]) + '"></div>'; }).join('') +
       '</div><div class="hint">Vem da caixa e do peso cadastrados no produto (+50 g de embalagem). O ML usa isso para calcular o frete.</div></div>' +
-      '<div class="card"><h2>6. Fotos e descrição</h2><div class="an-fotos" style="margin-bottom:10px">' + (st.fotos.length ? st.fotos.map(function (f) { return thumbHtml(f, st.fotos); }).join('') : '<span class="bad-t">Este produto não tem fotos. Cadastre pelo menos uma no produto.</span>') + '</div>' +
-      '<div class="field"><label>Descrição (do anúncio Mercado Livre)</label><textarea class="inp" rows="8" readonly>' + esc(a.descricao || '') + '</textarea><div class="hint">Para mudar o texto, edite o anúncio na tela de anúncios e salve. Emojis são tirados, porque o ML não aceita.</div></div></div>' +
+      '<div class="card"><h2>6. Fotos e descrição</h2><div class="row wrap" style="gap:8px;margin-bottom:10px">' + (st.fotos.length ? st.fotos.map(function (f) { return thumbHtml(f, st.fotos); }).join('') : '<span class="bad-t">Este produto não tem fotos. Cadastre pelo menos uma no produto.</span>') + '</div>' +
+      '<div class="field"><label for="ml-desc">Descrição</label><textarea class="inp" id="ml-desc" rows="14">' + esc(a.descricao || '') + '</textarea><div class="hint">Pode editar aqui: ao publicar, o texto novo também fica salvo no anúncio Mercado Livre do sistema. Emojis são tirados, porque o ML não aceita.</div></div></div>' +
       '<div id="ml-res"></div>' +
       '<div class="sticky-save"><a class="btn btn-g" href="#/anuncio/' + p.id + '">Cancelar</a><button type="button" class="btn btn-p" id="ml-pub">🚀 Publicar no Mercado Livre</button></div>';
 
@@ -4074,7 +4074,12 @@
       var btn = this, txt = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Publicando…';
       $('#ml-res').innerHTML = '';
       try {
-        var d = await mlChamar('publicar', { anuncio_id: a.id, item: m.item, descricao: a.descricao || '', dados: m.dados });
+        var desc = $('#ml-desc').value;
+        if (desc !== (a.descricao || '')) {
+          var sv = q(await sb.from('produto_anuncios').update({ descricao: desc, atualizado_em: new Date().toISOString() }).eq('id', a.id).select().single());
+          a.descricao = desc; mlTrocarAd(sv);
+        }
+        var d = await mlChamar('publicar', { anuncio_id: a.id, item: m.item, descricao: desc, dados: m.dados });
         mlTrocarAd(d.anuncio);
         toast('Publicado no Mercado Livre ✓');
         if (d.aviso) toast(d.aviso, true);
