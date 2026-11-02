@@ -3818,6 +3818,7 @@
   var ML_TIPOS = [{ v: 'gold_special', t: 'Clássico', pct: 11.5, d: 'taxa menor; parcelamento com juros para o cliente' }, { v: 'gold_pro', t: 'Premium', pct: 16.5, d: 'taxa maior; parcela sem juros e mais destaque' }];
   var ML_AUTO = ['SELLER_SKU', 'SELLER_PACKAGE_HEIGHT', 'SELLER_PACKAGE_WIDTH', 'SELLER_PACKAGE_LENGTH', 'SELLER_PACKAGE_WEIGHT', 'GTIN', 'ITEM_CONDITION'];
   var ML_STATUS = { active: ['No ar', 'p-ok'], paused: ['Pausado', 'p-warn'], closed: ['Finalizado', 'p-mut'], under_review: ['Em revisão no ML', 'p-warn'], inactive: ['Inativo', 'p-mut'], payment_required: ['Aguardando pagamento', 'p-warn'] };
+  var ML_SUB = { picture_download_pending: 'o ML ainda está baixando as fotos (leva alguns minutos)', out_of_stock: 'sem estoque', waiting_for_patch: 'esperando correção', poor_quality_picture: 'foto com qualidade baixa', poor_quality_thumbnail: 'foto de capa com qualidade baixa', forbidden: 'bloqueado pelo ML', held: 'retido pelo ML', warning: 'com alerta' };
   async function mlChamar(acao, extra) {
     var r = await sb.functions.invoke('mercado-livre', { body: Object.assign({ acao: acao }, extra || {}) });
     if (r.error) {
@@ -4146,7 +4147,7 @@
       '<div class="row wrap" style="gap:8px;justify-content:space-between"><div class="row wrap" style="gap:8px"><button class="btn btn-g" id="ml-pausa">Pausar</button><button class="btn btn-g" id="ml-ativa">Reativar</button><button class="btn btn-d" id="ml-fim">Finalizar anúncio</button></div><button class="btn btn-p" id="ml-env">Enviar mudanças</button></div></div>';
     function info(d) {
       var it = d.item || {};
-      $('#ml-st').innerHTML = mlStatusPill(it.status) + (it.sub_status && it.sub_status.length ? ' <span class="small muted">' + esc(it.sub_status.join(', ')) + '</span>' : '');
+      $('#ml-st').innerHTML = mlStatusPill(it.status) + (it.sub_status && it.sub_status.length ? ' <span class="small muted">' + esc(it.sub_status.map(function (x) { return ML_SUB[x] || x; }).join(', ')) + '</span>' : '');
       $('#ml-info').innerHTML = 'Preço no ML: <b>' + brl(it.price) + '</b> · à venda: <b>' + (it.available_quantity != null ? it.available_quantity : '—') + '</b> · vendidos: <b>' + (it.sold_quantity || 0) + '</b>' + (it.health != null ? ' · saúde do anúncio: <b>' + Math.round(it.health * 100) + '%</b>' : '');
       if (d.anuncio) mlTrocarAd(d.anuncio);
     }
