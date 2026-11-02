@@ -352,6 +352,8 @@
     S.falta18 = !!r18.error;
     var r16 = await sb.from('produto_anuncios').select('situacao').limit(1);
     S.falta16 = !!r16.error;
+    var r19 = await sb.from('insumos').select('peso_g').limit(1);
+    S.falta19 = !!r19.error;
     var r14 = await sb.from('insumos').select('formato').limit(1);
     S.falta14 = !!r14.error;
     var r13 = await sb.from('produtos').select('multicor').limit(1);
@@ -414,6 +416,17 @@
   function formatoDe(i) { return i ? (i.formato || (i.e_caixa ? 'caixa' : null)) : null; }
   function caixas(tipo) { return S.insumos.filter(function (i) { var f = formatoDe(i); return f && (!tipo || f === tipo); }); }
   function eEmbalagem(i) { return !!(i && (i.embalagem || formatoDe(i))); }
+  // peso do pacote = peça + caixa/envelope + acessórios de embalagem da ficha (bolha, etiqueta…)
+  function pesoPacote(p, cxId) {
+    var cid = cxId === undefined ? p.caixa_id : cxId, cx = cid && byId(S.insumos, cid), peca = num(p.peso_g) || 0, emb = 0, partes = [], conhecido = false;
+    if (cx && num(cx.peso_g)) { emb += num(cx.peso_g); partes.push(cx.nome + ' ' + fmt(num(cx.peso_g)) + ' g'); conhecido = true; }
+    else { emb += 50; partes.push((cx ? cx.nome : 'embalagem') + ' ~50 g (estimado)'); }
+    S.prodInsumos.filter(function (x) { return x.produto_id === p.id; }).forEach(function (x) {
+      var i = byId(S.insumos, x.insumo_id); if (!i || formatoDe(i) || !i.embalagem || !num(i.peso_g)) return;
+      var g = num(i.peso_g) * (num(x.quantidade) || 1); emb += g; partes.push(i.nome + ' ' + fmt(Math.round(g * 10) / 10) + ' g');
+    });
+    return { peca: peca, embalagem: emb, conhecido: conhecido, total: peca ? Math.ceil(peca + emb) : 0, partes: partes };
+  }
   function medCaixa(i) { if (!i || !num(i.caixa_c) || !num(i.caixa_l)) return ''; return fmt(num(i.caixa_c)) + ' × ' + fmt(num(i.caixa_l)) + (formatoDe(i) === 'caixa' && num(i.caixa_a) ? ' × ' + fmt(num(i.caixa_a)) : '') + ' cm'; }
   function wMedioImpressoras() { var ws = impressoras().filter(function (e) { return e.status === 'ativo'; }).map(function (e) { return num(e.potencia_w); }).filter(Boolean); return ws.length ? Math.round(ws.reduce(function (a, b) { return a + b; }, 0) / ws.length) : 120; }
   function faixasAtacado() { var f = S.cfg && S.cfg.atacado_faixas; return Array.isArray(f) && f.length ? f.slice().sort(function (a, b) { return a.min - b.min; }) : [{ min: 10, pct: 10 }, { min: 20, pct: 15 }, { min: 30, pct: 20 }, { min: 50, pct: 30 }]; }
@@ -1525,6 +1538,7 @@
     { k: 'caixa_c', label: 'Comprimento (cm)', type: 'num' },
     { k: 'caixa_l', label: 'Largura (cm)', type: 'num' },
     { k: 'caixa_a', label: 'Altura (cm)', type: 'num' },
+    { k: 'peso_g', label: 'Peso (g)', type: 'num', hint: 'Vazia, de uma unidade (ou de 1 metro, nos rolos). Entra no peso do pacote.' },
     { k: 'link_compra', label: 'Link de compra', span: 4, ph: 'cole o link aqui' },
     { k: 'observacoes', label: 'Observações', type: 'textarea', rows: 2, span: 4 }
   ];
@@ -1624,6 +1638,8 @@
       campo('caixa_c').classList.toggle('hidden', !(emb && f));
       campo('caixa_l').classList.toggle('hidden', !(emb && f));
       campo('caixa_a').classList.toggle('hidden', !(emb && f === 'caixa'));
+      campo('peso_g').classList.toggle('hidden', !emb || !!S.falta19);
+      $('label[for="fld-peso_g"]', m).textContent = elUn.value === 'm' ? 'Peso de 1 metro (g)' : 'Peso de uma unidade (g)';
       $('label[for="fld-caixa_c"]', m).textContent = f === 'envelope' ? 'Largura (cm)' : 'Comprimento (cm)';
       $('label[for="fld-caixa_l"]', m).textContent = f === 'envelope' ? 'Altura (cm)' : 'Largura (cm)';
       var u = elUn.value === 'm' ? 'metros' : 'unidades';
@@ -1631,7 +1647,7 @@
       $('label[for="fld-custo_unitario"]', m).textContent = elUn.value === 'm' ? 'Custo por metro (R$)' : 'Custo por unidade (R$)';
       $('label[for="fld-estoque"]', m).textContent = 'Em estoque (' + u + ')';
     };
-    if (S.falta14) { ['embalagem', 'formato', 'unidade'].forEach(function (k) { var c = campo(k); if (c) c.classList.add('hidden'); }); ['caixa_c', 'caixa_l', 'caixa_a'].forEach(function (k) { campo(k).classList.add('hidden'); }); }
+    if (S.falta14) { ['embalagem', 'formato', 'unidade'].forEach(function (k) { var c = campo(k); if (c) c.classList.add('hidden'); }); ['caixa_c', 'caixa_l', 'caixa_a', 'peso_g'].forEach(function (k) { campo(k).classList.add('hidden'); }); }
     else { [elEmb, elFmt, elUn].forEach(function (el) { el.addEventListener('change', verEmb); }); verEmb(); }
     var elPac = $('[data-k="preco_pacote"]', m), elQtd = $('[data-k="qtd_pacote"]', m), elUni = $('[data-k="custo_unitario"]', m), elEst = $('[data-k="estoque"]', m);
     var calc = $('#ins-calc', m);
@@ -1670,6 +1686,7 @@
             if (!o.formato) { o.caixa_c = null; o.caixa_l = null; o.caixa_a = null; }
             if (o.formato === 'envelope') o.caixa_a = null;
           }
+          if (S.falta19 || S.falta14) delete o.peso_g; else if (!o.embalagem) o.peso_g = null;
           if (foto.mudou || foto.foto) o.foto = foto.foto;
           var r = q(await sb.from('insumos').upsert(o).select().single());
           S.insumos = S.insumos.filter(function (x) { return x.id !== r.id; }).concat([r]).sort(function (x, y) { return x.nome.localeCompare(y.nome); });
@@ -3445,7 +3462,7 @@
     var r = {
       nome: (a.titulo || p.nome || '').trim(), descricao: (a.descricao || '').trim(), sku: 'CA-' + String(a.id).replace(/-/g, '').slice(0, 10).toUpperCase(),
       preco: preco ? Math.round(preco * 100) / 100 : null, estoque: a.estoque != null && a.estoque !== '' ? Math.max(0, Math.round(num(a.estoque))) : (p.estoque > 0 ? p.estoque : opc.estoqueEnc),
-      peso: pesoG ? Math.ceil((pesoG + opc.embalagem) / 10) / 100 : null, med: med, fotos: fotos, prazo: p.estoque > 0 ? null : opc.prazo
+      peso: pesoG ? Math.ceil((pesoG + (pesoPacote(p).conhecido ? pesoPacote(p).embalagem : opc.embalagem)) / 10) / 100 : null, med: med, fotos: fotos, prazo: p.estoque > 0 ? null : opc.prazo
     };
     var prob = [];
     if (r.nome.length < 2) prob.push('sem título');
@@ -3871,7 +3888,8 @@
   function mlPacote(p, cxId) {
     var cx = (cxId === undefined ? p.caixa_id : cxId) && byId(S.insumos, cxId === undefined ? p.caixa_id : cxId), medP = medidasCm(p.medidas);
     var med = cx && medCaixa(cx) ? [num(cx.caixa_c), num(cx.caixa_l), formatoDe(cx) === 'envelope' ? (medP ? Math.min.apply(null, medP) + 1 : 3) : num(cx.caixa_a)].map(function (n) { return Math.max(1, Math.ceil(n || 1)); }) : medP;
-    return { c: med ? med[0] : '', l: med ? med[1] : '', a: med ? med[2] : '', peso: num(p.peso_g) ? Math.ceil(num(p.peso_g) + 50) : '' };
+    var pp = pesoPacote(p, cxId);
+    return { c: med ? med[0] : '', l: med ? med[1] : '', a: med ? med[2] : '', peso: pp.peca ? pp.total : '', det: pp };
   }
   function mlNorm(s) { return norm(String(s || '')).replace(/[^a-z0-9]+/g, ' ').trim(); }
   function mlValorPadrao(at, p, st) {
@@ -3938,7 +3956,7 @@
       (caixas().length ? '' : '<div class="note" style="margin-bottom:10px">Ainda não tem nenhuma caixa ou envelope cadastrado. Em <b>Insumos e extras</b>, cadastre cada embalagem que vocês usam marcando que é <b>caixa</b> ou <b>envelope</b>, com as medidas (C × L × A em cm). Depois é só escolher aqui — e fica guardado no produto.</div>') +
       '<div class="grid g4">' +
       ['c:Comprimento (cm)', 'l:Largura (cm)', 'a:Altura (cm)', 'peso:Peso com embalagem (g)'].map(function (x) { var k = x.split(':'); return '<div class="field"><label for="ml-pk-' + k[0] + '">' + k[1] + '</label><input class="inp" id="ml-pk-' + k[0] + '" data-pk="' + k[0] + '" inputmode="decimal" value="' + esc(st.pacote[k[0]]) + '"></div>'; }).join('') +
-      '</div><div class="hint" id="ml-pk-hint">Medidas da caixa (ou envelope) por fora, e o peso dela fechada com a peça dentro. O peso é o da peça cadastrada +50 g de embalagem — se tiver balança, confira. O ML usa isso para calcular o frete; se ficar menor que o real, ele cobra a diferença depois.</div></div>' +
+      '</div><div class="hint" id="ml-pk-hint"></div></div>' +
       '<div class="card"><h2>6. Fotos e descrição</h2><div class="row wrap" style="gap:8px;margin-bottom:10px">' + (st.fotos.length ? st.fotos.map(function (f) { return thumbHtml(f, st.fotos); }).join('') : '<span class="bad-t">Este produto não tem fotos. Cadastre pelo menos uma no produto.</span>') + '</div>' +
       '<div class="field"><label for="ml-desc">Descrição</label><textarea class="inp" id="ml-desc" rows="14">' + esc(a.descricao || '') + '</textarea><div class="hint">Pode editar aqui: ao publicar, o texto novo também fica salvo no anúncio Mercado Livre do sistema. Emojis são tirados, porque o ML não aceita.</div></div></div>' +
       '<div id="ml-res"></div>' +
@@ -3952,7 +3970,14 @@
       if (obrig) st.freteGratis = true;
       $('#ml-frete').innerHTML = '<label class="check"><input type="checkbox" id="ml-fg"' + (st.freteGratis ? ' checked' : '') + (obrig ? ' disabled' : '') + '> Frete grátis para o cliente</label><div class="hint">' + (obrig ? 'A partir de R$ 79 o ML obriga o frete grátis. Vocês pagam uma parte do frete (o ML mostra o valor no anúncio).' : 'Abaixo de R$ 79 pode deixar o cliente pagar o frete.') + '</div>';
     }
-    drawTipo(); drawFrete();
+    function pkHint(pk) {
+      var d = pk && pk.det, el = $('#ml-pk-hint'); if (!el) return;
+      var txt = 'Medidas da caixa (ou envelope) por fora. ';
+      if (d && d.peca) txt += 'Peso: peça ' + fmt(d.peca) + ' g + ' + d.partes.join(' + ') + ' = ' + fmt(d.total) + ' g.' + (d.conhecido ? '' : ' Cadastre o peso da caixa em Insumos para ficar exato.');
+      else txt += 'O produto está sem peso cadastrado: digite o peso do pacote fechado.';
+      el.textContent = txt + ' Se ficar menor que o real, o ML cobra a diferença do frete depois.';
+    }
+    drawTipo(); drawFrete(); pkHint(d0.pacote ? null : st.pacote);
     box.addEventListener('input', function (e) {
       if (e.target.id === 'ml-titulo') tcont();
       if (e.target.id === 'ml-preco') { drawTipo(); drawFrete(); }
@@ -3963,6 +3988,7 @@
         var cx = byId(S.insumos, e.target.value), pk = mlPacote(p, e.target.value || null);
         if (cx && !medCaixa(cx)) toast('Essa embalagem está sem medidas. Cadastre em Insumos e extras ou digite abaixo.', true);
         ['c', 'l', 'a', 'peso'].forEach(function (k) { if (pk[k] !== '' && (cx ? medCaixa(cx) || k === 'peso' : true)) $('#ml-pk-' + k).value = pk[k]; });
+        pkHint(pk);
       }
       if (e.target.id === 'ml-fg') st.freteGratis = e.target.checked;
       var k = e.target.dataset.mla; if (k) lerAttr(k);
